@@ -43,3 +43,6 @@ logs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Offline installers are kept locally, not committed
+deploy/offline/packages/
