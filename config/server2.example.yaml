@@ -1,4 +1,10 @@
+# 服务器2角色配置示例
+# 统一平台通过角色配置启用处理、存储、只读输出和审计存证能力。
 environment: test
+roles:
+  - processing_storage
+  - readonly_output
+  - audit_proof
 server:
   internal_host: 0.0.0.0
   internal_port: 9081
@@ -6,7 +12,7 @@ server:
   readonly_output_port: 9082
   readonly_output_base_url: http://SERVER2_HOST:9082
 server1:
-  internal_base_url: http://SERVER1_HOST:8082
+  access_control_base_url: http://SERVER1_HOST:8081
 storage:
   veracrypt_mount_root: V:/geo_data_security
   project_volume_root: V:/geo_data_security/projects
