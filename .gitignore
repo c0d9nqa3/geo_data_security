@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+
+# Runtime data
+runtime/
+data/
+tmp/
+logs/
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+
+# VeraCrypt and large local data
+*.hc
+*.vc
+*.vhd
+*.vhdx
+*.tif
+*.tiff
+*.shp
+*.shx
+*.dbf
+*.geojson
+*.osgb
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,31 @@
+# 这是网络策略模板，不是防火墙配置命令。
+# 最终规则由甲方网络管理员审核并落地。
+network:
+  terminal_count_reserved: 11
+  terminal_to_server1:
+    allow:
+      - service: upload_and_business_api
+        port: 8081
+  terminal_to_server2:
+    allow:
+      - service: readonly_result_api
+        port: 9082
+      - service: authorized_geoserver
+        port: 8080
+  server1_to_server2:
+    allow:
+      - service: internal_task_api
+        port: 9081
+  server2_to_server1:
+    allow:
+      - service: status_callback
+        port: 8082
+  terminal_denied:
+    - postgres
+    - elasticsearch_admin
+    - kibana_admin
+    - fisco_bcos_admin
+    - veracrypt_filesystem
+    - file_share
+    - sandbox_admin
+    - windows_remote_admin

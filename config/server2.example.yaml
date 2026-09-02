@@ -1,0 +1,24 @@
+environment: test
+server:
+  internal_host: 0.0.0.0
+  internal_port: 9081
+  readonly_output_host: 0.0.0.0
+  readonly_output_port: 9082
+  readonly_output_base_url: http://SERVER2_HOST:9082
+server1:
+  internal_base_url: http://SERVER1_HOST:8082
+storage:
+  veracrypt_mount_root: V:/geo_data_security
+  project_volume_root: V:/geo_data_security/projects
+  runtime_root: V:/geo_data_security/runtime
+  result_root: V:/geo_data_security/results
+services:
+  postgres_url: REPLACE_IN_LOCAL_SECRET_STORE
+  elasticsearch_url: http://127.0.0.1:9200
+  fisco_bcos_rpc_url: REPLACE_IN_LOCAL_SECRET_STORE
+  geoserver_url: http://127.0.0.1:8080/geoserver
+security:
+  output_token_secret: REPLACE_IN_LOCAL_SECRET_STORE
+  tls_enabled: false
+limits:
+  max_parallel_jobs: 2
