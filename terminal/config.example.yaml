@@ -1,0 +1,17 @@
+# terminal 程序配置模板
+
+environment: test
+server1:
+  base_url: http://SERVER1_HOST:8081
+  upload_endpoint: /api/v1/ingest
+  task_endpoint: /api/v1/tasks
+server2:
+  readonly_output_url: http://SERVER2_HOST:9082
+  result_endpoint: /api/v1/readonly/results
+  geoserver_url: http://SERVER2_HOST:8080/geoserver
+security:
+  tls_enabled: false
+  ca_certificate_path: REPLACE_IN_LOCAL_CONFIG
+client:
+  request_timeout_seconds: 300
+  max_parallel_uploads: 2
