@@ -57,10 +57,13 @@ def _blocks(diagonal: np.ndarray):
             yield row, col
 
 
-def _step(pixels: np.ndarray) -> float:
+def _step(pixels: np.ndarray, dtype: str) -> float:
     data_range = float(np.max(pixels) - np.min(pixels)) or 1.0
-    # Fixed from the image range; embedding does not change the range materially.
-    return max(data_range * 0.004, np.finfo(np.float32).eps * 64)
+    if dtype == "uint8":
+        # Integer serialization needs a much larger coefficient displacement
+        # to survive rounding back to bytes.
+        return max(data_range * 4.0, 1024.0)
+    return max(data_range * 0.04, 8.0)
 
 
 def _modify(diagonal: np.ndarray, watermark: int, step: float) -> np.ndarray:
@@ -83,12 +86,23 @@ def _modify(diagonal: np.ndarray, watermark: int, step: float) -> np.ndarray:
 def embed_geotiff_watermark(source: Path, destination: Path, watermark: int) -> float:
     source = Path(source)
     pixels, profile = _read_band(source)
+    original_dtype = profile["dtype"]
+    original_tags = {}
+    with rasterio.open(source) as dataset:
+        original_tags = dataset.tags()
     diagonal, details = _transform(pixels)
-    step = _step(pixels)
+    step = _step(pixels, original_dtype)
     modified = _modify(diagonal, watermark, step)
-    output = _restore(modified, details, pixels.shape).astype(np.float32)
-    profile.update(dtype="float32", count=1)
+    output = _restore(modified, details, pixels.shape)
+    if original_dtype == "uint8":
+        output = np.clip(np.rint(output), 0, 255).astype(np.uint8)
+        output_dtype = "uint8"
+    else:
+        output = output.astype(original_dtype)
+        output_dtype = original_dtype
+    profile.update(dtype=output_dtype, count=1)
     with rasterio.open(destination, "w", **profile) as dataset:
+        dataset.update_tags(**original_tags)
         dataset.update_tags(**{_TAG_STEP: repr(step)})
         dataset.write(output, 1)
     return psnr(pixels, output)
@@ -96,11 +110,12 @@ def embed_geotiff_watermark(source: Path, destination: Path, watermark: int) -> 
 
 def extract_geotiff_watermark(source: Path) -> int:
     source = Path(source)
-    pixels, _ = _read_band(source)
-    diagonal, _ = _transform(pixels)
+    pixels, profile = _read_band(source)
+    dtype = profile["dtype"]
     with rasterio.open(source) as dataset:
         raw_step = dataset.tags().get(_TAG_STEP)
-    step = float(raw_step) if raw_step else _step(pixels)
+    step = float(raw_step) if raw_step else _step(pixels, dtype)
+    diagonal, _ = _transform(pixels)
     bits: list[int] = []
     for row, col in _blocks(diagonal):
         if len(bits) >= _BITS:

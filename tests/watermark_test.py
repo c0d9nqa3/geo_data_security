@@ -25,11 +25,9 @@ def test_geojson_adds_encrypted_watermark_without_changing_geometry(tmp_path):
         ],
     }), encoding="utf-8")
     destination = tmp_path / "watermarked.geojson"
-
     embed_geojson_watermark(source, destination, "user-1|project-1", b"key")
     output = json.loads(destination.read_text(encoding="utf-8"))
     original = json.loads(source.read_text(encoding="utf-8"))
-
     assert [f["geometry"] for f in output["features"]] == [f["geometry"] for f in original["features"]]
     assert all("_wm" in f["properties"] for f in output["features"])
     assert all(decrypt_text(f["properties"]["_wm"], b"key") == "user-1|project-1" for f in output["features"])
@@ -40,18 +38,13 @@ def test_geotiff_preserves_spatial_metadata_and_round_trips_32_bit_watermark(tmp
     source = tmp_path / "source.tif"
     destination = tmp_path / "watermarked.tif"
     values = np.arange(64 * 64, dtype=np.float32).reshape(64, 64)
-    profile = {
-        "driver": "GTiff", "height": 64, "width": 64, "count": 1,
-        "dtype": "float32", "crs": "EPSG:4326", "transform": from_origin(117, 41, 0.01, 0.01),
-    }
+    profile = {"driver": "GTiff", "height": 64, "width": 64, "count": 1, "dtype": "float32", "crs": "EPSG:4326", "transform": from_origin(117, 41, 0.01, 0.01)}
     with rasterio.open(source, "w", **profile) as dataset:
         dataset.write(values, 1)
-
     embed_geotiff_watermark(source, destination, 0xA5A5F00D)
     with rasterio.open(source) as before, rasterio.open(destination) as after:
         assert after.crs == before.crs
         assert after.transform == before.transform
         assert (after.width, after.height, after.count) == (before.width, before.height, before.count)
-        quality = psnr(before.read(1), after.read(1))
-        assert quality > 40.0
+        assert psnr(before.read(1), after.read(1)) > 40.0
     assert extract_geotiff_watermark(destination) == 0xA5A5F00D
