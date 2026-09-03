@@ -99,10 +99,15 @@ class ProcessingService:
         textures = sorted(path for path in source_dir.iterdir() if path.suffix.lower() in {".jpg", ".jpeg", ".png"}) if source_dir.is_dir() else []
         if not textures:
             raise ValueError("no JPG/PNG textures found")
+        use_trustmark = self.trustmark_engine is not None and hasattr(self.trustmark_engine, "embed_image")
         artifact_id, output_dir = self._artifact_dir(project_id)
         try:
             for source in textures:
-                embed_texture_watermark(source, output_dir / source.name, watermark)
+                destination = output_dir / source.name
+                if use_trustmark:
+                    self.trustmark_engine.embed_image(source, destination, watermark)
+                else:
+                    embed_texture_watermark(source, destination, watermark)
             self._write_manifest(output_dir, project_id, artifact_id, "OSGB_TEXTURES", source_dir, output_dir, len(textures))
             return ProcessingArtifact(artifact_id, "OSGB_TEXTURES", str(source_dir), str(output_dir), len(textures), "PENDING")
         except Exception:

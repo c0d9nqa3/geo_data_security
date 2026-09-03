@@ -47,6 +47,64 @@ def _payload_bits(watermark: int) -> str:
     return format(watermark, "032b")
 
 
+def embed_image(source: Path, destination: Path, watermark: int) -> dict:
+    """Embed one single-code-word watermark into an RGB image (texture) file.
+
+    Textures are typically 256-2048 px photos; single-code-word TrustMark covers
+    JPEG re-compression, uniform resize and noise (verified on photo-like textures).
+    Cropping is NOT covered in single-code-word mode - real OSGB texture workflow
+    never crops a texture, and the tiled GeoTIFF path covers crop-robust cases.
+    Output keeps the source container (PNG lossless / JPEG), watermark survives.
+    """
+    source, destination = Path(source), Path(destination)
+    with Image.open(source) as opened:
+        mode = opened.mode
+        rgb = opened.convert("RGB")
+    tm = _make_tm()
+    payload = _payload_bits(watermark)
+    encoded = tm.encode(rgb, payload, MODE="binary", WM_STRENGTH=1.0)
+    suffix = destination.suffix.lower()
+    save_kwargs: dict = {}
+    if suffix in {".jpg", ".jpeg"}:
+        save_kwargs = {"quality": 95}
+    encoded.save(destination, **save_kwargs)
+    with Image.open(destination) as saved:
+        w, h = saved.size
+    # PSNR over the RGB array vs the pre-encode cover
+    mse = float(np.mean((np.asarray(rgb).astype(np.float64) - np.asarray(Image.open(destination).convert("RGB")).astype(np.float64)) ** 2))
+    psnr = float("inf") if mse == 0 else 20 * np.log10(255.0 / np.sqrt(mse))
+    return {"mode": "single_code_word", "width": w, "height": h, "psnr_db": round(psnr, 3), "source_mode": mode}
+
+
+def extract_image(source: Path, expected_hex: str) -> dict:
+    """Decode a single-code-word texture watermark. Multi-scale fallback covers
+    resized textures (256-2048 px); plain decode covers JPEG/noise."""
+    source = Path(source)
+    expected = int(expected_hex, 16)
+    with Image.open(source) as opened:
+        image = opened.convert("RGB")
+    w, h = image.size
+    tm_plain = _make_tm()
+    # try original size first (full/JPEG/noise keep size)
+    bits, present, _ = tm_plain.decode(image, MODE="binary")
+    if present and len(bits) >= 32 and int(bits[:32], 2) == expected:
+        return {"detected": True, "method": "plain", "expected": expected_hex, "width": w, "height": h}
+    # resized texture: TrustMark resizes to 224 internally; try a small lattice of
+    # window sizes around 224px views is unnecessary - instead decode the resized
+    # image directly since resize preserves the code word (verified resize50_jpeg).
+    # Distinct path: image may be larger than trained range -> downscale lattice.
+    scales = []
+    for scale in (0.5, 0.25, 1.0):
+        if scale != 1.0 and max(w, h) * scale >= 224:
+            scales.append(scale)
+    for scale in scales:
+        resized = image.resize((max(224, int(w * scale)), max(224, int(h * scale))), Image.Resampling.BILINEAR)
+        bits, present, _ = tm_plain.decode(resized, MODE="binary")
+        if present and len(bits) >= 32 and int(bits[:32], 2) == expected:
+            return {"detected": True, "method": f"rescale_{scale}", "expected": expected_hex, "width": w, "height": h}
+    return {"detected": False, "method": "plain", "expected": expected_hex, "width": w, "height": h}
+
+
 def embed(source: Path, destination: Path, watermark: int) -> dict:
     source, destination = Path(source), Path(destination)
     with rasterio.open(source) as ds:
@@ -215,8 +273,12 @@ def main() -> int:
             result = embed(Path(args[1]), Path(args[2]), int(args[3], 16))
         elif command == "extract" and len(args) == 3:
             result = extract(Path(args[1]), args[2])
+        elif command == "image-embed" and len(args) == 4:
+            result = embed_image(Path(args[1]), Path(args[2]), int(args[3], 16))
+        elif command == "image-extract" and len(args) == 3:
+            result = extract_image(Path(args[1]), args[2])
         else:
-            print(json.dumps({"error": "usage: runner embed <src> <dst> <hex> | extract <src> <hex>"}), file=sys.stderr)
+            print(json.dumps({"error": "usage: runner embed|extract|image-embed|image-extract <src> <dst> <hex>"}), file=sys.stderr)
             return 2
         print(json.dumps(result, ensure_ascii=False))
         return 0

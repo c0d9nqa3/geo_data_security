@@ -88,3 +88,18 @@ class TrustMarkGeoTIFFEngine:
         if "error" in result:
             raise RuntimeError(f"TrustMark extract failed: {result['error']}")
         return result
+
+    def embed_image(self, source: Path, destination: Path, watermark: int) -> int:
+        """Embed single-code-word watermark into an image/texture file."""
+        if not 0 <= watermark <= 0xFFFFFFFF:
+            raise ValueError("watermark must be an unsigned 32-bit integer")
+        result = self._call(["image-embed", str(source), str(destination), format(watermark, "08X")])
+        if "error" in result:
+            raise RuntimeError(f"TrustMark image embed failed: {result['error']}")
+        return 1
+
+    def extract_image(self, source: Path, watermark: int) -> dict:
+        result = self._call(["image-extract", str(source), format(watermark, "08X")])
+        if "error" in result:
+            raise RuntimeError(f"TrustMark image extract failed: {result['error']}")
+        return result
