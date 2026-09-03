@@ -6,13 +6,14 @@ trustmark 0.9.0 editable + rasterio + pyproj）。
 
 用法:
     trustmark_geotiff_runner.py embed <source.tif> <dest.tif> <hex_watermark>
-    trustmark_geotiff_runner.py extract <source.tif> <expected_hex>   # 检测并输出是否命中
+    trustmark_geotiff_runner.py extract <source.tif> <expected_hex>
 
 约定:
 - GeoTIFF 单波段灰度; 复制为 RGB 供 TrustMark; 嵌入后取 R 通道写回原 profile。
 - 1024x1024 瓦片网格, 每瓦片独立嵌入同一 40bit BCH_SUPER 码字(32bit 业务位)。
-- 保留原 dtype/CRS/transform/tags。
-- stdout 输出单行 JSON; 失败非零退出并输出错误到 stderr。
+- 保留原 dtype/CRS/transform/tags, 并写入 GDS_TM_SRC_CRS/TF/W/H 记录原空间参考。
+- extract: 先读记录的原空间参考; 若当前 CRS 不同(重投影攻击)则 GDAL 逆投影回原网格;
+  然后 bbox 检测 + 多尺度网格/细滑窗口解码。stdout 单行 JSON; 失败非零退出。
 """
 from __future__ import annotations
 
@@ -23,6 +24,8 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from PIL import Image
+from rasterio.enums import Resampling
+from rasterio.transform import Affine
 from trustmark import TrustMark
 
 EXPECTED_HEX_TAG = "GDS_TM_PAYLOAD"
@@ -69,11 +72,70 @@ def embed(source: Path, destination: Path, watermark: int) -> dict:
             tiles += 1
     mse = float(np.mean((rgb.astype(np.float64) - marked.astype(np.float64)) ** 2))
     psnr = float("inf") if mse == 0 else 20 * np.log10(255.0 / np.sqrt(mse))
+    tf = profile.get("transform")
+    tags["GDS_TM_ENGINE"] = "TrustMark-Q-TILED1024"
+    tags["GDS_TM_ECC"] = "BCH_SUPER"
+    tags[EXPECTED_HEX_TAG] = format(watermark, "08X")
+    tags["GDS_TM_SRC_W"] = str(w)
+    tags["GDS_TM_SRC_H"] = str(h)
+    if profile.get("crs") is not None:
+        tags["GDS_TM_SRC_CRS"] = str(profile["crs"].to_string() if hasattr(profile["crs"], "to_string") else profile["crs"])
+    if tf is not None:
+        tags["GDS_TM_SRC_TF"] = ",".join(str(round(float(v), 12)) for v in (tf.a, tf.b, tf.c, tf.d, tf.e, tf.f))
     with rasterio.open(destination, "w", **profile) as ds:
         ds.update_tags(**tags)
-        ds.update_tags(GDS_TM_ENGINE="TrustMark-Q-TILED1024", GDS_TM_ECC="BCH_SUPER", EXPECTED_HEX_TAG=format(watermark, "08X"))
         ds.write(marked[:, :, 0].astype(np.uint8), 1)
     return {"tiles": tiles, "psnr_db": round(psnr, 3), "dtype": str(np.uint8), "width": w, "height": h}
+
+
+def _read_orig_georef(source: Path) -> dict:
+    """Read recorded original georeferencing written at embed time (may be absent)."""
+    try:
+        with rasterio.open(source) as ds:
+            tags = ds.tags()
+        out = {
+            "crs": tags.get("GDS_TM_SRC_CRS"),
+            "tf": tags.get("GDS_TM_SRC_TF"),
+            "w": tags.get("GDS_TM_SRC_W"),
+            "h": tags.get("GDS_TM_SRC_H"),
+        }
+        return {k: v for k, v in out.items() if v is not None}
+    except Exception:
+        return {}
+
+
+def _warp_back_to_orig_grid(source: Path, orig: dict) -> np.ndarray:
+    """Reproject attacked image onto the recorded original CRS/grid via GDAL.
+
+    Exact inverse of the warp attack: destination transform == recorded original
+    transform and destination size == recorded original size, so the embedded
+    1024-px tile grid aligns perfectly afterwards.
+    """
+    from rasterio.warp import reproject
+
+    with rasterio.open(source) as ds:
+        current_crs = ds.crs
+        current_tf = ds.transform
+        data = ds.read(1)
+    if current_crs is None:
+        raise ValueError("attacked image has no CRS; cannot reproject back")
+    orig_crs = rasterio.crs.CRS.from_string(orig["crs"])
+    if str(current_crs) == str(orig_crs):
+        raise ValueError("CRS already matches original; no warp needed")
+    tf_parts = [float(v) for v in orig["tf"].split(",")]
+    orig_tf = Affine(*tf_parts)
+    out_width, out_height = int(orig["w"]), int(orig["h"])
+    destination = np.empty((out_height, out_width), dtype=np.uint8)
+    reproject(
+        source=data,
+        destination=destination,
+        src_transform=current_tf,
+        src_crs=current_crs,
+        dst_transform=orig_tf,
+        dst_crs=orig_crs,
+        resampling=Resampling.bilinear,
+    )
+    return destination
 
 
 def _decode_ok(tm: TrustMark, image: Image.Image, expected: int) -> bool:
@@ -84,9 +146,17 @@ def _decode_ok(tm: TrustMark, image: Image.Image, expected: int) -> bool:
 def extract(source: Path, expected_hex: str, max_windows: int = 400) -> dict:
     source = Path(source)
     expected = int(expected_hex, 16)
+    orig = _read_orig_georef(source)
+    needs_warp = bool(orig) and "crs" in orig and "tf" in orig and "w" in orig and "h" in orig
     with rasterio.open(source) as ds:
+        current_crs = str(ds.crs) if ds.crs is not None else ""
         data = ds.read(1)
-        w, h = data.shape[1], data.shape[0]
+    if needs_warp and "crs" in orig and current_crs and current_crs != orig["crs"]:
+        try:
+            data = _warp_back_to_orig_grid(source, orig)
+        except Exception:
+            pass  # fall through to direct scanning of the attacked image
+    w, h = data.shape[1], data.shape[0]
     rgb = np.repeat(data[:, :, None], 3, axis=2)
     image = Image.fromarray(rgb, mode="RGB")
     tm_det = _make_tm(load_bbox=True)
@@ -95,18 +165,14 @@ def extract(source: Path, expected_hex: str, max_windows: int = 400) -> dict:
     try:
         bits, present, schema = tm_det.decode(image.convert("RGB"), MODE="binary", DETECTFIRST=True)
         if present and len(bits) >= 32 and int(bits[:32], 2) == expected:
-            return {"detected": True, "method": "bbox_detect", "expected": expected_hex}
+            return {"detected": True, "method": "bbox_detect", "expected": expected_hex, "warped": needs_warp}
     except Exception:
         pass
     # prong 2: multi-scale windows. Buckets ordered by likelihood: original 1024 tile
     # first (full/crop/JPEG/noise keep tile size), then shrinking (resize-down), then
-    # growing (resize-up).
-    # Within a bucket, grid-aligned windows (every `win` px) are tried FIRST in raster
-    # order: a crop shifts the tile phase by only a few px, so an aligned window sits
-    # within decoder tolerance even when the bbox detector fails. Fine sliding windows
-    # (step win//8, centre-first) then cover any residual phase offset.
+    # growing (resize-up). Each bucket gets a budget so one scale cannot starve others.
     scale_order = [1.0, 0.75, 0.625, 0.5, 0.375, 0.25, 0.1875, 0.125, 1.25, 1.5, 2.0]
-    per_scale_budget = 45  # attempts allowed per scale bucket, keeps one scale from starving others
+    per_scale_budget = 45
     attempts = 0
     for scale in scale_order:
         win = max(224, int(TILE * scale))
@@ -130,12 +196,12 @@ def extract(source: Path, expected_hex: str, max_windows: int = 400) -> dict:
         fine.sort(key=lambda c: abs(c[0] + win / 2 - w / 2) + abs(c[1] + win / 2 - h / 2))
         for x, y in grid_windows + fine[:per_scale_budget]:
             if attempts >= max_windows:
-                return {"detected": False, "method": "exhausted", "expected": expected_hex, "attempts": attempts}
+                return {"detected": False, "method": "exhausted", "expected": expected_hex, "attempts": attempts, "warped": needs_warp}
             attempts += 1
             patch = image.crop((x, y, x + win, y + win))
             if _decode_ok(tm_plain, patch, expected):
-                return {"detected": True, "method": "window", "expected": expected_hex, "attempts": attempts, "window": [x, y, win]}
-    return {"detected": False, "method": "exhausted", "expected": expected_hex, "attempts": attempts}
+                return {"detected": True, "method": "window", "expected": expected_hex, "attempts": attempts, "window": [x, y, win], "warped": needs_warp}
+    return {"detected": False, "method": "exhausted", "expected": expected_hex, "attempts": attempts, "warped": needs_warp}
 
 
 def main() -> int:
