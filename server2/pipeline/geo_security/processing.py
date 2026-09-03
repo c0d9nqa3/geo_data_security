@@ -109,10 +109,33 @@ class ProcessingService:
             self._failed(output_dir)
             raise
 
+    def process_shapefile_directory(self, project_id: str, source_dir: Path, user_id: str, timestamp: str, watermark_text: str | None = None) -> ProcessingArtifact:
+        """Embed the encrypted attribute watermark into every .shp layer of a DLG/SHP
+        directory (real DLG data is a multi-layer SHP folder). Geometry untouched."""
+        from .vector_watermark import embed_shapefile_watermark
+
+        source_dir = Path(source_dir)
+        layers = sorted(path for path in source_dir.iterdir() if path.suffix.lower() == ".shp") if source_dir.is_dir() else []
+        if not layers:
+            raise ValueError("no .shp layers found")
+        text = watermark_text or f"{user_id}|{timestamp}"
+        artifact_id, output_dir = self._artifact_dir(project_id)
+        try:
+            for source in layers:
+                destination = output_dir / source.name
+                embed_shapefile_watermark(source, destination, text, self.key)
+            self._write_manifest(output_dir, project_id, artifact_id, "SHP", source_dir, output_dir, len(layers))
+            return ProcessingArtifact(artifact_id, "SHP", str(source_dir), str(output_dir), len(layers), "PENDING")
+        except Exception:
+            self._failed(output_dir)
+            raise
+
     def process(self, project_id: str, data_type: str, source: Path, **kwargs) -> ProcessingArtifact:
         normalized = data_type.upper()
-        if normalized in {"GEOJSON", "SHP"}:
+        if normalized in {"GEOJSON"}:
             return self.process_geojson(project_id, source, kwargs["user_id"], kwargs["timestamp"], kwargs.get("decimals"))
+        if normalized == "SHP":
+            return self.process_shapefile_directory(project_id, source, kwargs["user_id"], kwargs["timestamp"], kwargs.get("watermark_text"))
         if normalized in {"GEOTIFF", "GTIFF"}:
             return self.process_geotiff(project_id, source, kwargs["watermark"])
         if normalized in {"OSGB_TEXTURES", "TEXTURES", "OSGB"}:

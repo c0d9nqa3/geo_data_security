@@ -98,7 +98,7 @@ def create_app(
     @app.post("/internal/tasks", status_code=202, dependencies=[Depends(require_service_header)])
     def submit_task(request: TaskRequest) -> dict[str, str]:
         normalized = request.data_type.upper()
-        source = check_input_path(request.source_path, expect_dir=normalized in {"TEXTURES", "OSGB_TEXTURES", "OSGB"})
+        source = check_input_path(request.source_path, expect_dir=normalized in {"SHP", "TEXTURES", "OSGB_TEXTURES", "OSGB"})
         task_id = secrets.token_hex(16)
         try:
             artifact = _process_task(request, source, app.state.processing_service)
@@ -178,7 +178,7 @@ def create_app(
 
 def _process_task(request: TaskRequest, source: Path, service: ProcessingService):
     normalized = request.data_type.upper()
-    if normalized in {"GEOJSON", "SHP"}:
+    if normalized in {"GEOJSON"}:
         return service.process(
             request.project_id,
             "GeoJSON",
@@ -186,6 +186,15 @@ def _process_task(request: TaskRequest, source: Path, service: ProcessingService
             user_id=request.user_id,
             timestamp="task",
             decimals=request.precision_decimals,
+        )
+    if normalized == "SHP":
+        return service.process(
+            request.project_id,
+            "SHP",
+            source,
+            user_id=request.user_id,
+            timestamp="task",
+            watermark_text=request.watermark_text,
         )
     if normalized in {"GEOTIFF", "GTIFF"}:
         watermark = _parse_watermark_int(request.watermark_text)
