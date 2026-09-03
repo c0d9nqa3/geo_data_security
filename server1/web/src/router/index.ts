@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { getToken } from '@/api/client'
+import { getToken } from '@/modules/auth/api'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -22,16 +22,22 @@ const router = createRouter({
           meta: { title: '工作台' },
         },
         {
-          path: 'projects',
-          name: 'projects',
-          component: () => import('@/views/ProjectsView.vue'),
-          meta: { title: '项目管理' },
+          path: 'circulation',
+          name: 'circulation',
+          component: () => import('@/modules/circulation/CirculationView.vue'),
+          meta: { title: '流转控制' },
         },
         {
           path: 'files',
           name: 'files',
           component: () => import('@/views/FilesView.vue'),
           meta: { title: '文件管理' },
+        },
+        {
+          path: 'projects',
+          name: 'projects',
+          component: () => import('@/views/ProjectsView.vue'),
+          meta: { title: '项目管理' },
         },
         {
           path: 'tasks',
@@ -42,7 +48,7 @@ const router = createRouter({
         {
           path: 'audit',
           name: 'audit',
-          component: () => import('@/views/AuditView.vue'),
+          component: () => import('@/modules/audit/AuditView.vue'),
           meta: { title: '审计追溯' },
         },
       ],

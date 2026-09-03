@@ -9,9 +9,9 @@ venv/
 node_modules/
 dist/
 
-# Runtime data
+# Runtime data（只忽略仓库根目录，避免误伤 com/geo/data 源码包）
 runtime/
-data/
+/data/
 tmp/
 logs/
 *.log

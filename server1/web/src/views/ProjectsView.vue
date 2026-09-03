@@ -51,10 +51,13 @@
           说明
           <textarea v-model="form.description" rows="3" placeholder="项目用途与数据范围" />
         </label>
-        <p class="tip">当前为前端演示：提交后写入本地列表，待 project 模块 API 就绪后改为真实创建。</p>
+        <p v-if="errorMsg" class="tip" style="color: var(--danger)">{{ errorMsg }}</p>
+        <p class="tip">提交后自动进入流转待办，管理员审核通过并分发授权后项目才会生效。</p>
         <div class="actions">
           <button type="button" class="ghost" @click="showCreate = false">取消</button>
-          <button type="submit" class="primary">创建</button>
+          <button type="submit" class="primary" :disabled="submitting">
+            {{ submitting ? '创建中…' : '创建' }}
+          </button>
         </div>
       </form>
     </div>
@@ -63,14 +66,16 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { fetchProjects } from '@/api/client'
+import { createProject, fetchProjects } from '@/modules/project/api'
 import type { Project } from '@/types'
 
 const loading = ref(true)
 const projects = ref<Project[]>([])
 const keyword = ref('')
 const showCreate = ref(false)
+const submitting = ref(false)
 const form = reactive({ name: '', code: '', description: '' })
+const errorMsg = ref('')
 
 const filtered = computed(() => {
   const q = keyword.value.trim().toLowerCase()
@@ -89,27 +94,25 @@ onMounted(async () => {
   loading.value = false
 })
 
-function onCreate() {
-  const now = new Date()
-  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-  projects.value = [
-    {
-      id: `prj_${Date.now()}`,
+async function onCreate() {
+  errorMsg.value = ''
+  submitting.value = true
+  try {
+    const created = await createProject({
       name: form.name,
       code: form.code,
-      status: 'draft',
-      owner: '当前用户',
-      memberCount: 1,
-      fileCount: 0,
-      updatedAt: stamp,
       description: form.description || '新建项目',
-    },
-    ...projects.value,
-  ]
-  form.name = ''
-  form.code = ''
-  form.description = ''
-  showCreate.value = false
+    })
+    projects.value = [created, ...projects.value]
+    form.name = ''
+    form.code = ''
+    form.description = ''
+    showCreate.value = false
+  } catch (e) {
+    errorMsg.value = e instanceof Error ? e.message : '创建失败'
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 

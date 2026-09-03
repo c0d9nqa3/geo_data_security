@@ -1,0 +1,34 @@
+auth:
+  user-store: memory
+  token-store: memory
+  jwt-secret: TEST_ONLY_CHANGE_ME_32CHARS_MINIMUM
+  token-ttl-seconds: 3600
+  require-session-cache: true
+
+gateway:
+  business-store: stub
+  environment: test
+  security:
+    jwt-secret: TEST_ONLY_CHANGE_ME_32CHARS_MINIMUM
+    token-ttl-seconds: 3600
+    tls-enabled: false
+    public-paths:
+      - /api/health
+      - /api/ready
+      - /api/auth/login
+      - /actuator/health
+  rate-limit:
+    enabled: false
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+  access-policy:
+    max-terminals: 11
+    max-upload-size-gb: 50
+    blocked-path-patterns:
+      - /server2
+
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration

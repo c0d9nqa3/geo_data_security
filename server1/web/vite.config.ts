@@ -12,7 +12,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // 开发时转发到 server1 后端（gateway）
+      // 开发时转发到 server1 后端（app 进程）
       '/api': {
         target: 'http://127.0.0.1:8081',
         changeOrigin: true,

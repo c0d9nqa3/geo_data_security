@@ -10,8 +10,8 @@
 
 | 部分 | 位置 | 职责 |
 |---|---|---|
-| 前端 | `server1/web/` | 页面与调用 REST API |
-| 后端 API | `gateway/` `auth/` `project/` `ingest/` `task/` `circulation/` `audit/` | 登录权限、业务接口、服务间调用 |
+| 前端 | `server1/web/` | 页面与调用 REST API（`src/modules/` 按后端模块划分） |
+| 后端 API | `app` 组装 `gateway` + `auth` / `circulation` / `ingest` / `project` / `task` / `audit` | 接入、登录、流转、文件接收、项目、任务、审计 |
 
 同机部署 ≠ 前后端不分离。代码契约用 HTTP JSON API，后续：
 
@@ -21,16 +21,19 @@
 
 比 JSP/模板耦合更利于接 server2，也更符合成员1「Web 界面 + 后端 API」分工。
 
-## 页面（成员1功能点）
+## 页面与模块对应
 
-- 登录 / 权限会话
-- 工作台
-- 项目管理
-- 文件管理（上传入口）
-- 任务管理
-- 审计追溯
+| 页面 | 前端 API | 后端模块 |
+|---|---|---|
+| 登录 / 退出 | `src/modules/auth/` | auth |
+| 流转控制 | `src/modules/circulation/` | circulation |
+| 文件管理 | `src/modules/ingest/` | ingest |
+| 项目管理 | `src/modules/project/` | project |
+| 任务管理 | `src/modules/task/` | task |
+| 审计追溯 | `src/modules/audit/` | audit |
+| 工作台 | 聚合上述 API | 网关入口 |
 
-开发期 `src/api/client.ts` 使用 mock；`USE_MOCK = false` 后走真实 `/api`。
+开发期走真实 `/api`（Vite 代理到 `app` 进程 `:8081`）。
 
 ## 本地运行
 
@@ -43,7 +46,7 @@ npm run dev
 浏览器打开提示的地址（默认 `http://127.0.0.1:5173`）。  
 开发代理：`/api` → `http://127.0.0.1:8081`（见 `vite.config.ts`）。
 
-演示账号：用户名 `admin`（管理员）或任意名称（操作员），密码任意非空。
+演示账号：用户名 `admin` / `admin123` 或 `operator` / `operator123`。
 
 ## 构建
 

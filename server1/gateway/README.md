@@ -1,7 +1,14 @@
-# gateway：服务器1业务入口
+# gateway：服务器1 业务接入网关
 
-接收终端的登录、上传、项目操作、任务提交和状态查询请求。这里是服务器1对终端开放的入口，不负责直接处理原始测绘文件。
+网关只做接入：鉴权、限流、统一错误、访问日志、健康检查。  
+本模块是库，**没有启动类**。由 `app` 模块组装进同一个进程。
 
-后续代码放置：API路由、请求校验、限流、统一错误响应、终端访问日志。
+业务接口分别在 `auth`、`circulation`、`ingest`、`project`、`task`、`audit` 模块中实现。
 
-禁止：直接读取服务器2原始文件、绕过权限调用内部服务、把数据库端口暴露给终端。
+启动见 `server1/app/README.md`：
+
+```bash
+cd server1
+mvn clean install -DskipTests
+mvn -pl app spring-boot:run
+```

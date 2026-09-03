@@ -1,0 +1,85 @@
+server:
+  port: 8081
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: server1
+  datasource:
+    url: jdbc:mysql://${SERVER1_DB_HOST:127.0.0.1}:${SERVER1_DB_PORT:3306}/geo_server1?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: ${SERVER1_DB_USER:root}
+    password: ${SERVER1_DB_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  servlet:
+    multipart:
+      max-file-size: 50GB
+      max-request-size: 50GB
+  jackson:
+    default-property-inclusion: non_null
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+auth:
+  # 本地内存会话，不需要 Redis；用户账号默认从 MySQL 读取
+  token-store: memory
+  user-store: jdbc
+  jwt-secret: ${SERVER1_JWT_SECRET:LOCAL_DEV_ONLY_CHANGE_ME_32CHARS_MIN}
+  token-ttl-seconds: 28800
+  require-session-cache: true
+
+gateway:
+  environment: test
+  business-store: jdbc
+  security:
+    jwt-secret: ${SERVER1_JWT_SECRET:LOCAL_DEV_ONLY_CHANGE_ME_32CHARS_MIN}
+    token-ttl-seconds: 28800
+    tls-enabled: false
+    public-paths:
+      - /api/health
+      - /api/ready
+      - /api/auth/login
+      - /actuator/health
+  rate-limit:
+    enabled: true
+    requests-per-minute-per-ip: 120
+    requests-per-minute-per-user: 180
+    burst: 40
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+      - http://localhost:5174
+      - http://127.0.0.1:5174
+      - http://localhost:5175
+      - http://127.0.0.1:5175
+  access-policy:
+    max-terminals: 11
+    max-upload-size-gb: 50
+    blocked-path-patterns:
+      - /actuator/env
+      - /actuator/beans
+      - /actuator/mappings
+      - /.git
+      - /server2
+      - /veracrypt
+      - /elasticsearch
+      - /fisco
+
+ingest:
+  receive-dir: ${INGEST_RECEIVE_DIR:./data/receive}
+
+logging:
+  level:
+    root: INFO
+    GATEWAY_ACCESS: INFO
+    com.geo.data.security.server1: INFO

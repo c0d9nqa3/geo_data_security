@@ -58,10 +58,13 @@
             <option>脱敏 / 精度处理</option>
           </select>
         </label>
-        <p class="tip">服务器1 负责任务编排；实际计算在服务器2 沙箱执行。</p>
+        <p v-if="errorMsg" class="tip" style="color: var(--danger)">{{ errorMsg }}</p>
+        <p class="tip">提交后自动进入流转待办，管理员审核通过并分发授权后才会交给服务器2执行。</p>
         <div class="actions">
           <button type="button" class="ghost" @click="showCreate = false">取消</button>
-          <button type="submit" class="primary">提交</button>
+          <button type="submit" class="primary" :disabled="submitting">
+            {{ submitting ? '提交中…' : '提交' }}
+          </button>
         </div>
       </form>
     </div>
@@ -70,7 +73,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { fetchFiles, fetchTasks } from '@/api/client'
+import { fetchFiles } from '@/modules/ingest/api'
+import { createTask, fetchTasks } from '@/modules/task/api'
 import type { DataFile, TaskItem, TaskStatus } from '@/types'
 
 const loading = ref(true)
@@ -78,6 +82,8 @@ const tasks = ref<TaskItem[]>([])
 const files = ref<DataFile[]>([])
 const statusFilter = ref('')
 const showCreate = ref(false)
+const submitting = ref(false)
+const errorMsg = ref('')
 const form = reactive({ fileId: '', type: 'GeoTIFF 水印' })
 
 const filtered = computed(() =>
@@ -104,29 +110,19 @@ onMounted(async () => {
   loading.value = false
 })
 
-function onCreate() {
-  const file = files.value.find((f) => f.id === form.fileId)
-  if (!file) return
-  const now = new Date()
-  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-  tasks.value = [
-    {
-      id: `task_${Date.now()}`,
-      projectId: file.projectId,
-      projectName: file.projectName,
-      fileId: file.id,
-      fileName: file.name,
-      type: form.type,
-      status: 'queued',
-      progress: 0,
-      createdBy: '当前用户',
-      createdAt: stamp,
-      updatedAt: stamp,
-    },
-    ...tasks.value,
-  ]
-  form.fileId = ''
-  showCreate.value = false
+async function onCreate() {
+  errorMsg.value = ''
+  submitting.value = true
+  try {
+    const created = await createTask({ fileId: form.fileId, type: form.type })
+    tasks.value = [created, ...tasks.value]
+    form.fileId = ''
+    showCreate.value = false
+  } catch (e) {
+    errorMsg.value = e instanceof Error ? e.message : '提交失败'
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 

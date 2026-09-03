@@ -38,7 +38,7 @@
       </table>
     </div>
 
-    <div v-if="showUpload" class="modal-mask" @click.self="showUpload = false">
+    <div v-if="showUpload" class="modal-mask" @click.self="closeUpload">
       <form class="modal" @submit.prevent="onUpload">
         <h3>上传数据到服务器1</h3>
         <label>
@@ -48,6 +48,19 @@
             <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
         </label>
+        <label>
+          本地文件
+          <input
+            ref="fileInput"
+            class="file-input"
+            type="file"
+            required
+            @change="onPickFile"
+          />
+        </label>
+        <p v-if="pickedFile" class="tip">
+          已选择 {{ pickedFile.name }}（{{ formatSize(pickedFile.size) }}）
+        </p>
         <label>
           数据类型
           <select v-model="form.kind">
@@ -59,13 +72,16 @@
           </select>
         </label>
         <label>
-          文件名
-          <input v-model="form.name" required placeholder="例如：tile_B01.tif" />
+          显示名称（可选）
+          <input v-model="form.name" placeholder="默认使用本地文件名" />
         </label>
-        <p class="tip">真实环境由 ingest 模块接收、校验并转交服务器2；此处仅模拟上传记录。</p>
+        <p v-if="errorMsg" class="tip" style="color: var(--danger)">{{ errorMsg }}</p>
+        <p class="tip">提交后自动进入流转待办，管理员审核通过并分发授权后才会转交服务器2。</p>
         <div class="actions">
-          <button type="button" class="ghost" @click="showUpload = false">取消</button>
-          <button type="submit" class="primary">模拟上传</button>
+          <button type="button" class="ghost" @click="closeUpload">取消</button>
+          <button type="submit" class="primary" :disabled="submitting || !pickedFile">
+            {{ submitting ? '上传中…' : '确认上传' }}
+          </button>
         </div>
       </form>
     </div>
@@ -74,7 +90,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { fetchFiles, fetchProjects } from '@/api/client'
+import { fetchFiles, uploadFile } from '@/modules/ingest/api'
+import { fetchProjects } from '@/modules/project/api'
 import type { DataFile, FileKind, Project } from '@/types'
 
 const loading = ref(true)
@@ -82,6 +99,10 @@ const files = ref<DataFile[]>([])
 const projects = ref<Project[]>([])
 const projectFilter = ref('')
 const showUpload = ref(false)
+const submitting = ref(false)
+const errorMsg = ref('')
+const fileInput = ref<HTMLInputElement | null>(null)
+const pickedFile = ref<File | null>(null)
 const form = reactive({
   projectId: '',
   kind: 'GeoTIFF' as FileKind,
@@ -103,34 +124,69 @@ function statusText(s: DataFile['status']) {
   )[s]
 }
 
+function inferKind(name: string): FileKind {
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  if (ext === 'tif' || ext === 'tiff') return 'GeoTIFF'
+  if (ext === 'shp' || ext === 'geojson' || ext === 'json') return 'SHP/GeoJSON'
+  if (ext === 'dlg') return 'DLG'
+  if (ext === 'osgb') return 'OSGB'
+  return '其他'
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+function onPickFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  pickedFile.value = file
+  if (file) {
+    form.name = file.name
+    form.kind = inferKind(file.name)
+  }
+}
+
+function closeUpload() {
+  showUpload.value = false
+  errorMsg.value = ''
+  form.name = ''
+  form.projectId = ''
+  pickedFile.value = null
+  if (fileInput.value) {
+    fileInput.value.value = ''
+  }
+}
+
 onMounted(async () => {
   ;[projects.value, files.value] = await Promise.all([fetchProjects(), fetchFiles()])
   loading.value = false
 })
 
-function onUpload() {
-  const project = projects.value.find((p) => p.id === form.projectId)
-  if (!project) return
-  const now = new Date()
-  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-  files.value = [
-    {
-      id: `file_${Date.now()}`,
-      projectId: project.id,
-      projectName: project.name,
+async function onUpload() {
+  errorMsg.value = ''
+  if (!pickedFile.value) {
+    errorMsg.value = '请选择要上传的本地文件'
+    return
+  }
+  submitting.value = true
+  try {
+    const created = await uploadFile({
+      projectId: form.projectId,
       name: form.name,
       kind: form.kind,
-      sizeMb: Math.round(Math.random() * 800 + 20),
-      status: 'uploaded',
-      hash: `sha256:${Math.random().toString(16).slice(2, 6)}…`,
-      uploadedBy: '当前用户',
-      uploadedAt: stamp,
-    },
-    ...files.value,
-  ]
-  form.name = ''
-  form.projectId = ''
-  showUpload.value = false
+      file: pickedFile.value,
+    })
+    files.value = [created, ...files.value]
+    closeUpload()
+  } catch (e) {
+    errorMsg.value = e instanceof Error ? e.message : '上传失败'
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 
@@ -220,6 +276,12 @@ code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   color: var(--info);
+  max-width: 220px;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .tag {
@@ -260,7 +322,7 @@ code {
 }
 
 .modal {
-  width: min(460px, 100%);
+  width: min(520px, 100%);
   display: grid;
   gap: 12px;
   padding: 22px;
@@ -278,6 +340,21 @@ code {
   gap: 6px;
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.file-input {
+  width: 100%;
+  cursor: pointer;
+}
+
+.file-input::file-selector-button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text);
+  padding: 8px 12px;
+  margin-right: 10px;
+  cursor: pointer;
 }
 
 .tip {

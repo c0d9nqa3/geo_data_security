@@ -4,8 +4,8 @@
       <div class="brand">
         <div class="brand-mark" aria-hidden="true" />
         <div>
-          <div class="brand-title">数据安全平台</div>
-          <div class="brand-sub">服务器1 · 接入控制面</div>
+          <div class="brand-title">地信安全平台</div>
+          <div class="brand-sub">GEO SECURITY · 接入控制</div>
         </div>
       </div>
 
@@ -32,12 +32,15 @@
     </aside>
 
     <div class="main">
-      <header class="topbar">
+      <header class="topbar" :class="{ compact: isDashboard }">
         <div>
-          <h1>{{ title }}</h1>
-          <p>终端通过本界面访问服务器1业务能力；结果只读接口由服务器2提供。</p>
+          <div class="crumb">GEO / SECURE / {{ title }}</div>
+          <h1 v-if="!isDashboard">{{ title }}</h1>
+          <p v-if="!isDashboard">终端通过本界面访问服务器1业务能力；结果只读接口由服务器2提供。</p>
         </div>
-        <div class="env-pill">测试环境 · Win10</div>
+        <div class="top-actions">
+          <div class="env-pill">测试环境 · Win10</div>
+        </div>
       </header>
       <main class="content">
         <RouterView />
@@ -49,7 +52,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter, RouterLink, RouterView } from 'vue-router'
-import { getStoredUser, logout } from '@/api/client'
+import { getStoredUser, logout } from '@/modules/auth/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -57,13 +60,15 @@ const user = getStoredUser()
 
 const nav = [
   { to: '/dashboard', label: '工作台' },
-  { to: '/projects', label: '项目管理' },
+  { to: '/circulation', label: '流转控制' },
   { to: '/files', label: '文件管理' },
+  { to: '/projects', label: '项目管理' },
   { to: '/tasks', label: '任务管理' },
   { to: '/audit', label: '审计追溯' },
 ]
 
 const title = computed(() => (route.meta.title as string) || '工作台')
+const isDashboard = computed(() => route.name === 'dashboard')
 
 const roleLabel = computed(() => {
   const map: Record<string, string> = {
@@ -201,18 +206,23 @@ async function onLogout() {
   border-color: var(--accent);
 }
 
-.main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
 .topbar {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  padding: 28px 32px 12px;
+  padding: 20px 28px 8px;
+}
+
+.topbar.compact {
+  padding-bottom: 0;
+}
+
+.crumb {
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
 }
 
 .topbar h1 {
@@ -230,6 +240,12 @@ async function onLogout() {
   line-height: 1.5;
 }
 
+.top-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
 .env-pill {
   flex-shrink: 0;
   padding: 8px 12px;
@@ -241,7 +257,16 @@ async function onLogout() {
 }
 
 .content {
-  padding: 12px 32px 40px;
+  padding: 8px 28px 28px;
+  flex: 1;
+  min-height: 0;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100vh;
 }
 
 @media (max-width: 900px) {

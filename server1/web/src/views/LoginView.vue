@@ -1,11 +1,34 @@
 <template>
   <div class="login-page">
+    <header class="brand-head">
+      <div class="shield" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="40" height="40" fill="none">
+          <path
+            d="M24 4L40 10V22C40 33 32.5 41.5 24 44C15.5 41.5 8 33 8 22V10L24 4Z"
+            stroke="currentColor"
+            stroke-width="2.2"
+            fill="rgba(42,157,143,0.12)"
+          />
+          <path
+            d="M14 28C18 22 21 20 24 20C28 20 30 24 34 18"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+          />
+        </svg>
+      </div>
+      <h1 class="brand-title">武汉测绘地信数据安全平台</h1>
+      <p class="brand-en">WUHAN GEO-SPATIAL DATA SECURITY</p>
+    </header>
+
     <section class="panel">
       <div class="panel-copy">
         <p class="eyebrow">测绘地理信息 · 数据安全</p>
-        <h1>服务器1 接入控制台</h1>
+        <p class="tagline">一套平台 · 三个功能区</p>
+        <h2>保护测绘数据<br />从导入到追溯的完整闭环</h2>
         <p class="lead">
-          在内网终端完成登录、上传、权限校验、任务提交与状态查询。处理与只读结果由服务器2承担。
+          VeraCrypt 加密分区、PostGIS 元数据索引、四类水印不改坐标与拓扑，Elasticsearch
+          流转日志与链上不可篡改凭证，覆盖导入、处理、审核与追溯。
         </p>
         <ul>
           <li>登录与项目权限</li>
@@ -33,7 +56,6 @@
         <button type="submit" :disabled="loading">
           {{ loading ? '登录中…' : '进入平台' }}
         </button>
-        <p class="hint">开发期使用 mock 鉴权；后端 auth 模块就绪后走 /api/auth/login。</p>
       </form>
     </section>
   </div>
@@ -42,7 +64,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { login } from '@/api/client'
+import { login } from '@/modules/auth/api'
 
 const router = useRouter()
 const route = useRoute()
@@ -70,9 +92,40 @@ async function onSubmit() {
 <style scoped>
 .login-page {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
   padding: 32px 16px;
+  box-sizing: border-box;
+}
+
+.brand-head {
+  width: min(960px, 100%);
+  text-align: center;
+}
+
+.shield {
+  color: var(--accent-hover);
+  display: inline-flex;
+  margin-bottom: 8px;
+  filter: drop-shadow(0 0 10px rgba(42, 157, 143, 0.4));
+}
+
+.brand-title {
+  margin: 0;
+  font-size: clamp(26px, 3vw, 36px);
+  letter-spacing: 0.03em;
+}
+
+.brand-en {
+  margin: 8px 0 0;
+  color: var(--accent);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  font-weight: 600;
 }
 
 .panel {
@@ -96,18 +149,24 @@ async function onSubmit() {
 }
 
 .eyebrow {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   color: var(--accent);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
-.panel-copy h1 {
+.tagline {
+  margin: 0 0 12px;
+  color: var(--warn);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.panel-copy h2 {
   margin: 0;
-  font-size: 34px;
-  line-height: 1.2;
+  font-size: 28px;
+  line-height: 1.35;
 }
 
 .lead {
@@ -200,13 +259,6 @@ button[type='submit']:disabled {
   margin: 0;
   color: var(--danger);
   font-size: 13px;
-}
-
-.hint {
-  margin: 4px 0 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 @media (max-width: 800px) {

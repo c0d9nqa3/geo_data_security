@@ -8,6 +8,10 @@
         <option value="create_project">创建项目</option>
         <option value="submit_task">提交任务</option>
         <option value="approve">审批</option>
+        <option value="reject">驳回</option>
+        <option value="apply_circulation">流转申请</option>
+        <option value="distribute">分发授权</option>
+        <option value="delete_circulation">删除流转单</option>
         <option value="download_result">结果下载</option>
         <option value="query_trace">追溯查询</option>
       </select>
@@ -33,7 +37,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="e in filtered" :key="e.id">
+          <tr v-for="e in events" :key="e.id">
             <td>{{ e.time }}</td>
             <td>{{ e.actor }}</td>
             <td>{{ actionText(e.action) }}</td>
@@ -48,22 +52,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { fetchAudits } from '@/api/client'
+import { onMounted, ref, watch } from 'vue'
+import { fetchAudits } from '@/modules/audit/api'
 import type { AuditAction, AuditEvent } from '@/types'
 
 const loading = ref(true)
 const events = ref<AuditEvent[]>([])
 const actionFilter = ref('')
 const resultFilter = ref('')
-
-const filtered = computed(() =>
-  events.value.filter((e) => {
-    if (actionFilter.value && e.action !== actionFilter.value) return false
-    if (resultFilter.value && e.result !== resultFilter.value) return false
-    return true
-  }),
-)
 
 function actionText(a: AuditAction) {
   return (
@@ -73,6 +69,10 @@ function actionText(a: AuditAction) {
       create_project: '创建项目',
       submit_task: '提交任务',
       approve: '审批',
+      reject: '驳回',
+      apply_circulation: '流转申请',
+      distribute: '分发授权',
+      delete_circulation: '删除流转单',
       download_result: '结果下载',
       query_trace: '追溯查询',
     } as const
@@ -83,10 +83,17 @@ function resultText(r: AuditEvent['result']) {
   return ({ success: '成功', denied: '拒绝', error: '错误' } as const)[r]
 }
 
-onMounted(async () => {
-  events.value = await fetchAudits()
-  loading.value = false
-})
+async function load() {
+  loading.value = true
+  try {
+    events.value = await fetchAudits(actionFilter.value || undefined, resultFilter.value || undefined)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(load)
+watch([actionFilter, resultFilter], load)
 </script>
 
 <style scoped>
