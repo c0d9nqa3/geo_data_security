@@ -1,0 +1,113 @@
+from pathlib import Path
+import sys
+import json
+import time
+
+import numpy as np
+import rasterio
+from PIL import Image, ImageFilter
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "runtime" / "trustmark_source" / "python"))
+from trustmark import TrustMark
+
+EXPECTED = 0xA5A5F00D
+BASE = ROOT / "runtime" / "trustmark_full_tiled" / "B1_full_tiled.tif"
+OUT = ROOT / "runtime" / "trustmark_scene_matrix"
+OUT.mkdir(parents=True, exist_ok=True)
+TILE = 1024
+
+with rasterio.open(BASE) as ds:
+    src_arr = ds.read(1)
+    src_crs = ds.crs
+    src_tf = ds.transform
+    src_profile = ds.profile.copy()
+h, w = src_arr.shape
+
+tm = TrustMark(verbose=True, model_type="Q", encoding_type=TrustMark.Encoding.BCH_SUPER, loadRemover=False)
+
+def dec_ok(img):
+    bits, present, schema = tm.decode(img.convert("RGB"), MODE="binary")
+    if present and len(bits) >= 32 and int(bits[:32], 2) == EXPECTED:
+        return True
+    return False
+
+def grid_scan(img, tile_px, max_windows=24):
+    """Center-first grid-aligned windows; returns True on first hit."""
+    tw, th = img.size
+    win = max(224, int(tile_px))
+    candidates = []
+    for gox in range(-4, 5):
+        for goy in range(-4, 5):
+            # window top-left such that window center ~ grid point
+            cx = (tw // 2 // win) * win + gox  # near center column origin variant
+            cy = (th // 2 // win) * win + goy
+            for gy in range(cy - win, th + win, win):
+                for gx in range(cx - win, tw + win, win):
+                    if 0 <= gx < tw and 0 <= gy < th and gx + win <= tw and gy + win <= th:
+                        candidates.append((gx, gy))
+    seen, uniq = set(), []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c); uniq.append(c)
+    uniq.sort(key=lambda c: abs(c[0] + win / 2 - tw / 2) + abs(c[1] + win / 2 - th / 2))
+    attempts = 0
+    for x, y in uniq:
+        if attempts >= max_windows:
+            break
+        attempts += 1
+        if dec_ok(img.crop((x, y, x + win, y + win))):
+            return True, attempts, (x, y, win)
+    return False, attempts, None
+
+rows = []
+
+def run(name, img, tile_px):
+    s = time.perf_counter()
+    ok, attempts, where = grid_scan(img, tile_px)
+    rows.append({"scenario": name, "ok": ok, "attempts": attempts, "window": where, "seconds": round(time.perf_counter() - s, 1), "size": list(img.size)})
+    print(json.dumps(rows[-1], ensure_ascii=False), flush=True)
+
+rgb = np.repeat(src_arr[:, :, None], 3, axis=2)
+marked = Image.fromarray(rgb, mode="RGB")
+
+# --- attacks ---
+# random-position crops (multiple batches per ratio)
+for name, frac, rng in [("crop25_rnd_a", .25, (1234, 987)), ("crop25_rnd_b", .25, (3111, 2888)), ("crop25_rnd_c", .25, (500, 4000)), ("crop75_rnd_a", .75, (500, 400)), ("crop75_rnd_b", .75, (2500, 3000)), ("crop75_rnd_c", .75, (300, 3500))]:
+    cw, ch = int(w * frac), int(h * frac)
+    x0 = min(rng[0], w - cw); y0 = min(rng[1], h - ch)
+    run(name, marked.crop((x0, y0, x0 + cw, y0 + ch)), TILE)
+# center crops
+for frac in [.25, .5, .75]:
+    cw, ch = int(w * frac), int(h * frac)
+    x0, y0 = (w - cw) // 2, (h - ch) // 2
+    run(f"crop_center{int(frac*100)}", marked.crop((x0, y0, x0 + cw, y0 + ch)), TILE)
+# scales
+for scale in [.25, .5, .75, 1.25]:
+    run(f"resize_{int(scale*100)}", marked.resize((int(w * scale), int(h * scale)), Image.Resampling.BILINEAR), int(TILE * scale))
+# jpeg
+jp = OUT / "jpeg_q90.jpg"; marked.save(jp, "JPEG", quality=90)
+run("jpeg_q90", Image.open(jp), TILE)
+# png / deflate format conversions
+run("png_convert", marked.convert("RGB"), TILE)
+# noise x3 batches
+for k, seed in enumerate([123, 7, 999]):
+    rng2 = np.random.default_rng(seed)
+    noisy = np.clip(rgb.astype(np.int16) + rng2.normal(0, 2, rgb.shape), 0, 255).astype(np.uint8)
+    run(f"noise_sigma2_b{k}", Image.fromarray(noisy, mode="RGB"), TILE)
+# filters
+run("gaussian", marked.filter(ImageFilter.GaussianBlur(1.0)), TILE)
+run("median", marked.filter(ImageFilter.MedianFilter(3)), TILE)
+# reproject: 32644 -> 4326 -> back to ORIGINAL grid (dst_transform=src tf), then grid scan hits directly
+from rasterio.warp import calculate_default_transform, reproject, Resampling
+with rasterio.open(BASE) as ds:
+    t1, w1, h1 = calculate_default_transform(ds.crs, "EPSG:4326", ds.width, ds.height, *ds.bounds)
+    a1 = np.empty((h1, w1), dtype=np.uint8)
+    reproject(source=ds.read(1), destination=a1, src_transform=ds.transform, src_crs=ds.crs, dst_transform=t1, dst_crs="EPSG:4326", resampling=Resampling.bilinear)
+    a2 = np.empty((h, w), dtype=np.uint8)  # same grid as original
+    reproject(source=a1, destination=a2, src_transform=t1, src_crs="EPSG:4326", dst_transform=src_tf, dst_crs=src_crs, resampling=Resampling.bilinear)
+    run("reproject_4326_attack", Image.fromarray(np.repeat(a2[:, :, None], 3, axis=2), mode="RGB"), TILE)
+
+(OUT / "report_scene_b1.json").write_text(json.dumps({"expected": hex(EXPECTED), "results": rows}, ensure_ascii=False, indent=2), encoding="utf-8")
+passed = sum(1 for r in rows if r["ok"])
+print(json.dumps({"passed": passed, "total": len(rows), "rate": round(passed / len(rows), 3)}), flush=True)

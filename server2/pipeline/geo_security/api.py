@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .pipeline import LocalProcessingPipeline, OutputNotReadyError, UnknownResultError
+from .processing import ProcessingService, UnsupportedDataTypeError
 
 
 class ApproveRequest(BaseModel):
@@ -34,18 +35,34 @@ def _require_service_token(value: str | None) -> None:
         raise HTTPException(status_code=401, detail="service authentication required")
 
 
-def create_app(workspace: Path, key: bytes, allowed_input_roots: list[Path] | None = None) -> FastAPI:
+def _parse_watermark_int(text: str) -> int:
+    cleaned = text.strip()
+    try:
+        return int(cleaned, 16) if cleaned.lower().startswith("0x") else int(cleaned)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"watermark_text must be a 32-bit integer or 0x hex, got: {text!r}") from exc
+
+
+def create_app(
+    workspace: Path,
+    key: bytes,
+    allowed_input_roots: list[Path] | None = None,
+    processing_service: ProcessingService | None = None,
+) -> FastAPI:
     app = FastAPI(title="Geo Data Security Server2")
     pipeline = LocalProcessingPipeline(Path(workspace), key)
+    service = processing_service or ProcessingService(Path(workspace), key)
     app.state.pipeline = pipeline
+    app.state.processing_service = service
     app.state.tasks: dict[str, dict] = {}
     app.state.artifacts: dict[str, dict] = {}
     roots = [(Path(item).resolve()) for item in (allowed_input_roots or [Path.cwd()])]
 
-    def check_input_path(source_path: str) -> Path:
+    def check_input_path(source_path: str, expect_dir: bool = False) -> Path:
         candidate = Path(source_path).resolve()
-        if not candidate.is_file():
-            raise HTTPException(status_code=404, detail="input file not found")
+        exists_ok = candidate.is_dir() if expect_dir else candidate.is_file()
+        if not exists_ok:
+            raise HTTPException(status_code=404, detail="input path not found")
         if not any(candidate == root or root in candidate.parents for root in roots):
             raise HTTPException(status_code=403, detail="input path is outside allowed roots")
         return candidate
@@ -59,12 +76,24 @@ def create_app(workspace: Path, key: bytes, allowed_input_roots: list[Path] | No
 
     @app.post("/internal/tasks", status_code=202, dependencies=[Depends(require_service_header)])
     def submit_task(request: TaskRequest) -> dict[str, str]:
-        source = check_input_path(request.source_path)
+        normalized = request.data_type.upper()
+        source = check_input_path(request.source_path, expect_dir=normalized in {"TEXTURES", "OSGB_TEXTURES", "OSGB"})
         task_id = secrets.token_hex(16)
         try:
-            artifact = _process_task(request, source, pipeline)
+            artifact = _process_task(request, source, app.state.processing_service)
+        except UnsupportedDataTypeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # processing failure: mark task FAILED, artifact dir already cleaned by service
+            app.state.tasks[task_id] = {
+                "task_id": task_id,
+                "status": "FAILED",
+                "project_id": request.project_id,
+                "user_id": request.user_id,
+                "error": str(exc),
+            }
+            return {"task_id": task_id, "status": "FAILED", "result_id": ""}
         app.state.artifacts[artifact.artifact_id] = {"artifact": artifact, "user_id": request.user_id, "project_id": request.project_id}
         app.state.tasks[task_id] = {"task_id": task_id, "status": "COMPLETED", "result_id": artifact.artifact_id, "project_id": request.project_id, "user_id": request.user_id}
         return {"task_id": task_id, "status": "COMPLETED", "result_id": artifact.artifact_id}
@@ -104,7 +133,8 @@ def create_app(workspace: Path, key: bytes, allowed_input_roots: list[Path] | No
         artifact = artifact_record["artifact"]
         if artifact.status != "APPROVED":
             raise HTTPException(status_code=403, detail="result is not approved")
-        result_dir = Path(artifact.output).parent
+        output_path = Path(artifact.output)
+        result_dir = output_path if output_path.is_dir() else output_path.parent
         candidate = (result_dir / filename).resolve()
         if candidate.parent != result_dir.resolve() or not candidate.is_file():
             raise HTTPException(status_code=404, detail="file not found")
@@ -113,15 +143,21 @@ def create_app(workspace: Path, key: bytes, allowed_input_roots: list[Path] | No
     return app
 
 
-def _process_task(request: TaskRequest, source: Path, pipeline: LocalProcessingPipeline):
-    if request.data_type.upper() == "GEOJSON":
-        from .processing import ProcessingService
-        return ProcessingService(pipeline.root, pipeline.key).process(
+def _process_task(request: TaskRequest, source: Path, service: ProcessingService):
+    normalized = request.data_type.upper()
+    if normalized in {"GEOJSON", "SHP"}:
+        return service.process(
             request.project_id,
-            request.data_type,
+            "GeoJSON",
             source,
             user_id=request.user_id,
             timestamp="task",
             decimals=request.precision_decimals,
         )
-    raise HTTPException(status_code=422, detail=f"task data type not implemented: {request.data_type}")
+    if normalized in {"GEOTIFF", "GTIFF"}:
+        watermark = _parse_watermark_int(request.watermark_text)
+        return service.process(request.project_id, "GeoTIFF", source, watermark=watermark)
+    if normalized in {"TEXTURES", "OSGB_TEXTURES", "OSGB"}:
+        watermark = _parse_watermark_int(request.watermark_text)
+        return service.process(request.project_id, "TEXTURES", source, watermark=watermark)
+    raise UnsupportedDataTypeError(f"task data type not implemented: {request.data_type}")
