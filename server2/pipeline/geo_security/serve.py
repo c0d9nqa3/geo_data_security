@@ -40,18 +40,23 @@ def _audit_dir() -> Path | None:
     return Path(configured)
 
 
-app = create_app(
-    workspace=DEFAULT_WORKSPACE,
-    key=KEY_MATERIAL,
-    allowed_input_roots=[DEFAULT_WORKSPACE, Path(os.environ.get("GDS_INPUT_ROOT", DEFAULT_WORKSPACE))],
-    processing_service=None,  # create_app builds one with workspace; engine injected below via env-only path
-    audit_log_dir=_audit_dir(),
-)
+def _task_database() -> Path:
+    configured = os.environ.get("GDS_TASK_DATABASE")
+    if configured:
+        return Path(configured)
+    return DEFAULT_WORKSPACE / "state" / "server2.sqlite3"
 
-# Rebuild the processing service with the TrustMark engine when available. create_app
-# accepted an injected service, so we patch the app state after construction.
+
 from .processing import ProcessingService  # noqa: E402
 
 _engine = _trustmark_engine_or_none()
 _service = ProcessingService(workspace=DEFAULT_WORKSPACE, key=KEY_MATERIAL, trustmark_engine=_engine)
-app.state.processing_service = _service
+
+app = create_app(
+    workspace=DEFAULT_WORKSPACE,
+    key=KEY_MATERIAL,
+    allowed_input_roots=[DEFAULT_WORKSPACE, Path(os.environ.get("GDS_INPUT_ROOT", DEFAULT_WORKSPACE))],
+    processing_service=_service,
+    audit_log_dir=_audit_dir(),
+    task_database_path=_task_database(),
+)

@@ -12,13 +12,14 @@ from pydantic import BaseModel, Field
 
 from .pipeline import LocalProcessingPipeline, OutputNotReadyError, UnknownResultError
 from .processing import ProcessingService, UnsupportedDataTypeError
+from .task_store import TaskStore
 
-try:  # audit_log lives in server2/audit; caller must put that dir on sys.path
+try:  # prefer server2/audit when deployed as a sibling module
     import audit_log  # type: ignore
+except Exception:  # package-local fallback used by PYTHONPATH=server2/pipeline
+    from . import audit_log  # type: ignore
 
-    _HAS_AUDIT = True
-except Exception:  # noqa: BLE001
-    _HAS_AUDIT = False
+_HAS_AUDIT = True
 
 
 class ApproveRequest(BaseModel):
@@ -57,6 +58,7 @@ def create_app(
     allowed_input_roots: list[Path] | None = None,
     processing_service: ProcessingService | None = None,
     audit_log_dir: Path | str | None = None,
+    task_database_path: Path | str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Geo Data Security Server2")
     pipeline = LocalProcessingPipeline(Path(workspace), key)
@@ -67,8 +69,8 @@ def create_app(
     app.state.pipeline = pipeline
     app.state.processing_service = service
     app.state.audit = audit
-    app.state.tasks: dict[str, dict] = {}
-    app.state.artifacts: dict[str, dict] = {}
+    task_store = TaskStore(task_database_path or (Path(workspace) / "state" / "server2.sqlite3"))
+    app.state.task_store = task_store
     roots = [(Path(item).resolve()) for item in (allowed_input_roots or [Path.cwd()])]
 
     def audit_record(event: str, actor: str | None = None, **details) -> None:
@@ -113,18 +115,22 @@ def create_app(
         except Exception as exc:  # processing failure: mark task FAILED, artifact dir already cleaned by service
             audit_record("TASK_FAILED", actor=request.user_id, project_id=request.project_id,
                          data_type=request.data_type, task_id=task_id, reason=str(exc))
-            app.state.tasks[task_id] = {
+            task = {
                 "task_id": task_id,
                 "status": "FAILED",
                 "project_id": request.project_id,
                 "user_id": request.user_id,
+                "result_id": "",
                 "error": str(exc),
             }
+            app.state.task_store.save_task(task)
             return {"task_id": task_id, "status": "FAILED", "result_id": ""}
         audit_record("TASK_SUBMITTED", actor=request.user_id, project_id=request.project_id,
                      data_type=request.data_type, task_id=task_id, source_path=str(source))
-        app.state.artifacts[artifact.artifact_id] = {"artifact": artifact, "user_id": request.user_id, "project_id": request.project_id}
-        app.state.tasks[task_id] = {"task_id": task_id, "status": "COMPLETED", "result_id": artifact.artifact_id, "project_id": request.project_id, "user_id": request.user_id}
+        app.state.task_store.save_artifact(artifact, project_id=request.project_id, user_id=request.user_id)
+        task = {"task_id": task_id, "status": "COMPLETED", "result_id": artifact.artifact_id,
+                "project_id": request.project_id, "user_id": request.user_id}
+        app.state.task_store.save_task(task)
         audit_record("TASK_COMPLETED", actor=request.user_id, project_id=request.project_id,
                      data_type=request.data_type, task_id=task_id, result_id=artifact.artifact_id)
         return {"task_id": task_id, "status": "COMPLETED", "result_id": artifact.artifact_id}
@@ -132,24 +138,25 @@ def create_app(
     @app.get("/internal/tasks/{task_id}")
     def task_status(task_id: str, service_token: Annotated[str | None, Header(alias="X-Service-Token")] = None) -> dict:
         _require_service_token(service_token)
-        task = app.state.tasks.get(task_id)
+        task = app.state.task_store.get_task(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="task not found")
         return task
     @app.post("/internal/results/{result_id}/approve")
     def approve(result_id: str, request: ApproveRequest, service_token: Annotated[str | None, Header(alias="X-Service-Token")] = None) -> dict[str, str]:
         _require_service_token(service_token)
-        artifact_record = app.state.artifacts.get(result_id)
+        artifact_record = app.state.task_store.get_artifact_record(result_id)
         if not artifact_record:
             raise HTTPException(status_code=404, detail="result not found")
         artifact = artifact_record["artifact"]
         artifact_record["artifact"] = artifact.__class__(artifact.artifact_id, artifact.data_type, artifact.source, artifact.output, artifact.files_processed, "APPROVED")
+        app.state.task_store.set_artifact_status(result_id, "APPROVED")
         audit_record("RESULT_APPROVED", actor=request.reviewer_id, result_id=result_id, project_id=artifact_record["project_id"])
         return {"result_id": result_id, "approval_status": "APPROVED"}
 
     @app.get("/readonly/results/{result_id}/manifest")
     def manifest(result_id: str, user_id: str, project_id: str) -> dict:
-        artifact_record = app.state.artifacts.get(result_id)
+        artifact_record = app.state.task_store.get_artifact_record(result_id)
         if not artifact_record or artifact_record["user_id"] != user_id or artifact_record["project_id"] != project_id:
             raise HTTPException(status_code=404, detail="result not found")
         if artifact_record["artifact"].status != "APPROVED":
@@ -159,7 +166,7 @@ def create_app(
 
     @app.get("/readonly/results/{result_id}/file")
     def result_file(result_id: str, user_id: str, project_id: str, filename: str) -> FileResponse:
-        artifact_record = app.state.artifacts.get(result_id)
+        artifact_record = app.state.task_store.get_artifact_record(result_id)
         if not artifact_record or artifact_record["user_id"] != user_id or artifact_record["project_id"] != project_id:
             raise HTTPException(status_code=404, detail="result not found")
         artifact = artifact_record["artifact"]

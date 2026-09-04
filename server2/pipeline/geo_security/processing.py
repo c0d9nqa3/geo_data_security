@@ -35,9 +35,20 @@ class ProcessingService:
         self.trustmark_engine = trustmark_engine
         self.workspace.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _validate_project_id(project_id: str) -> str:
+        if not project_id or project_id in {".", ".."} or any(char in project_id for char in "/\\"):
+            raise ValueError("invalid project id")
+        return project_id
+
     def _artifact_dir(self, project_id: str) -> tuple[str, Path]:
+        project_id = self._validate_project_id(project_id)
         artifact_id = str(uuid.uuid4())
-        output = self.workspace / "projects" / project_id / "results" / artifact_id
+        project_root = (self.workspace / "projects" / project_id).resolve()
+        workspace_root = self.workspace.resolve()
+        if workspace_root != project_root and workspace_root not in project_root.parents:
+            raise ValueError("project path escapes workspace")
+        output = project_root / "results" / artifact_id
         output.mkdir(parents=True, exist_ok=False)
         return artifact_id, output
 
