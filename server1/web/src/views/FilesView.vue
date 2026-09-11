@@ -7,10 +7,11 @@
       </select>
       <button type="button" class="primary" @click="showUpload = true">上传数据</button>
     </div>
+    <p class="hint">{{ reviewer ? '管理员可查看全部上传文件。' : '你只能看到自己上传的文件，入库后可发起处理作业。' }}</p>
 
-    <div v-if="loading" class="empty">加载中…</div>
-    <div v-else class="table-wrap">
-      <table>
+    <div class="table-wrap">
+      <div v-if="loading" class="empty-inline">加载中…</div>
+      <table v-else>
         <thead>
           <tr>
             <th>文件</th>
@@ -21,10 +22,11 @@
             <th>哈希</th>
             <th>上传人</th>
             <th>时间</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="f in filtered" :key="f.id">
+          <tr v-for="f in files" :key="f.id">
             <td class="name">{{ f.name }}</td>
             <td>{{ f.kind }}</td>
             <td>{{ f.projectName }}</td>
@@ -33,9 +35,22 @@
             <td><code>{{ f.hash }}</code></td>
             <td>{{ f.uploadedBy }}</td>
             <td>{{ f.uploadedAt }}</td>
+            <td>
+              <button
+                v-if="f.status === 'transferred'"
+                type="button"
+                class="btn-mini"
+                @click="startProcess(f.id)"
+              >
+                发起处理
+              </button>
+              <span v-else class="muted">入库后可处理</span>
+            </td>
           </tr>
         </tbody>
       </table>
+      <div v-if="!loading && !files.length" class="empty-inline">暂无文件</div>
+      <PagerBar v-model:page="page" v-model:page-size="pageSize" :total="total" :total-pages="totalPages" :loading="loading" />
     </div>
 
     <div v-if="showUpload" class="modal-mask" @click.self="closeUpload">
@@ -76,7 +91,7 @@
           <input v-model="form.name" placeholder="默认使用本地文件名" />
         </label>
         <p v-if="errorMsg" class="tip" style="color: var(--danger)">{{ errorMsg }}</p>
-        <p class="tip">提交后自动进入流转待办，管理员审核通过并分发授权后才会转交服务器2。</p>
+        <p class="tip">提交后自动进入流转待办和任务管理流程图。管理员审核通过后，提交人可到流转控制向服务器2分发。未审核前可在任务管理撤回。</p>
         <div class="actions">
           <button type="button" class="ghost" @click="closeUpload">取消</button>
           <button type="submit" class="primary" :disabled="submitting || !pickedFile">
@@ -89,14 +104,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { fetchFiles, uploadFile } from '@/modules/ingest/api'
 import { fetchProjects } from '@/modules/project/api'
+import { canReview } from '@/shared/access'
+import PagerBar from '@/shared/PagerBar.vue'
 import type { DataFile, FileKind, Project } from '@/types'
+
+const router = useRouter()
+const reviewer = canReview()
 
 const loading = ref(true)
 const files = ref<DataFile[]>([])
 const projects = ref<Project[]>([])
+const total = ref(0)
+const totalPages = ref(1)
+const page = ref(1)
+const pageSize = ref(10)
 const projectFilter = ref('')
 const showUpload = ref(false)
 const submitting = ref(false)
@@ -109,10 +134,6 @@ const form = reactive({
   name: '',
 })
 
-const filtered = computed(() =>
-  projectFilter.value ? files.value.filter((f) => f.projectId === projectFilter.value) : files.value,
-)
-
 function statusText(s: DataFile['status']) {
   return (
     {
@@ -122,6 +143,10 @@ function statusText(s: DataFile['status']) {
       failed: '失败',
     } as const
   )[s]
+}
+
+function startProcess(fileId: string) {
+  router.push({ name: 'tasks', query: { fileId } })
 }
 
 function inferKind(name: string): FileKind {
@@ -162,9 +187,44 @@ function closeUpload() {
 }
 
 onMounted(async () => {
-  ;[projects.value, files.value] = await Promise.all([fetchProjects(), fetchFiles()])
-  loading.value = false
+  try {
+    const projectPage = await fetchProjects({ page: 1, pageSize: 100 })
+    projects.value = projectPage.items
+  } catch {
+    projects.value = []
+  }
+  await reload()
 })
+
+watch(projectFilter, () => {
+  page.value = 1
+})
+watch(pageSize, () => {
+  page.value = 1
+})
+watch([page, pageSize, projectFilter], reload)
+
+async function reload() {
+  loading.value = true
+  try {
+    const data = await fetchFiles({
+      projectId: projectFilter.value || undefined,
+      page: page.value,
+      pageSize: pageSize.value,
+    })
+    files.value = data.items
+    total.value = data.total
+    totalPages.value = data.totalPages
+    page.value = data.page
+    pageSize.value = data.pageSize
+  } catch {
+    files.value = []
+    total.value = 0
+    totalPages.value = 1
+  } finally {
+    loading.value = false
+  }
+}
 
 async function onUpload() {
   errorMsg.value = ''
@@ -174,14 +234,16 @@ async function onUpload() {
   }
   submitting.value = true
   try {
-    const created = await uploadFile({
+    await uploadFile({
       projectId: form.projectId,
       name: form.name,
       kind: form.kind,
       file: pickedFile.value,
     })
-    files.value = [created, ...files.value]
+    files.value = []
     closeUpload()
+    page.value = 1
+    await reload()
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : '上传失败'
   } finally {
@@ -199,6 +261,17 @@ async function onUpload() {
 .toolbar {
   display: flex;
   gap: 10px;
+}
+
+.hint {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(78, 168, 222, 0.08);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 select,
@@ -238,11 +311,18 @@ input {
 .empty {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: rgba(28, 37, 48, 0.88);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
 }
 
 .empty {
   padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.empty-inline {
+  padding: 28px 14px;
   text-align: center;
   color: var(--text-muted);
 }
@@ -262,6 +342,7 @@ td {
 th {
   font-size: 12px;
   color: var(--text-muted);
+  background: rgba(15, 157, 142, 0.06);
 }
 
 tr:last-child td {
@@ -269,6 +350,21 @@ tr:last-child td {
 }
 
 .name {
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.btn-mini {
+  border-radius: 8px;
+  padding: 5px 10px;
+  border: 1px solid rgba(78, 168, 222, 0.28);
+  background: rgba(78, 168, 222, 0.1);
+  color: #1d6f9a;
+  font-size: 12px;
   font-weight: 600;
 }
 

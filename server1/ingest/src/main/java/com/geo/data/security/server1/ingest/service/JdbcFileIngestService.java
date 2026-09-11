@@ -7,7 +7,9 @@ import com.geo.data.security.server1.common.context.RequestContext;
 import com.geo.data.security.server1.common.error.ApiException;
 import com.geo.data.security.server1.common.error.ErrorCode;
 import com.geo.data.security.server1.common.support.Checks;
+import com.geo.data.security.server1.common.support.DataScope;
 import com.geo.data.security.server1.common.support.TimeFormats;
+import com.geo.data.security.server1.common.web.PageDto;
 import com.geo.data.security.server1.ingest.controller.dto.DataFileDto;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -28,6 +30,7 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -53,9 +56,21 @@ public class JdbcFileIngestService implements FileIngestService {
     }
 
     @Override
-    public List<DataFileDto> listFiles(String projectId) {
-        RequestContext.requirePrincipal();
-        boolean filter = projectId != null && !projectId.isBlank();
+    public PageDto<DataFileDto> listFiles(String projectId, Integer page, Integer pageSize) {
+        AccessPrincipal principal = RequestContext.requirePrincipal();
+        StringBuilder where = new StringBuilder(" WHERE 1=1");
+        List<Object> args = new ArrayList<>();
+        DataScope.restrictToOwner(where, args, principal, "f.uploaded_by");
+        if (projectId != null && !projectId.isBlank()) {
+            where.append(" AND f.project_id = ?");
+            args.add(projectId.trim());
+        }
+        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM biz_file f" + where, Long.class, args.toArray());
+        long count = total == null ? 0 : total;
+        int size = PageDto.normalizeSize(pageSize);
+        int pages = PageDto.totalPages(count, size);
+        int current = PageDto.normalizePage(page, pages);
+        int offset = (current - 1) * size;
         String sql = """
                 SELECT f.file_id, f.project_id, p.project_name, f.file_name, f.data_kind,
                        f.size_bytes, f.status, f.content_hash, f.created_at,
@@ -63,18 +78,26 @@ public class JdbcFileIngestService implements FileIngestService {
                 FROM biz_file f
                 LEFT JOIN biz_project p ON p.project_id = f.project_id
                 LEFT JOIN sys_user u ON u.user_id = f.uploaded_by
-                """ + (filter ? " WHERE f.project_id = ? " : " ") + """
-                ORDER BY f.created_at DESC, f.id DESC
-                """;
-        return filter
-                ? jdbc.query(sql, this::mapFile, projectId)
-                : jdbc.query(sql, this::mapFile);
+                """ + where + " ORDER BY f.created_at DESC, f.id DESC LIMIT ?, ?";
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(offset);
+        pageArgs.add(size);
+        List<DataFileDto> items = jdbc.query(sql, this::mapFile, pageArgs.toArray());
+        return PageDto.of(items, count, current, size);
+    }
+
+    @Override
+    public long countAll() {
+        RequestContext.requirePrincipal();
+        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM biz_file", Long.class);
+        return total == null ? 0 : total;
     }
 
     @Override
     @Transactional
     public DataFileDto createFile(String projectIdRaw, String kind, String displayName, MultipartFile file) {
         AccessPrincipal principal = RequestContext.requirePrincipal();
+        Checks.requirePermission(principal, "upload");
         String projectId = Checks.requireText(projectIdRaw, "请选择目标项目");
         if (file == null || file.isEmpty()) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "请选择要上传的本地文件");
@@ -84,15 +107,19 @@ public class JdbcFileIngestService implements FileIngestService {
         String kindUi = (kind == null || kind.isBlank()) ? inferKind(original) : kind.trim();
         String kindDb = toDbKind(kindUi);
 
-        List<String> names = jdbc.query(
-                "SELECT project_name FROM biz_project WHERE project_id = ? LIMIT 1",
-                (rs, i) -> rs.getString("project_name"),
+        List<ProjectRef> projects = jdbc.query(
+                "SELECT project_name, owner_user_id FROM biz_project WHERE project_id = ? LIMIT 1",
+                (rs, i) -> new ProjectRef(rs.getString("project_name"), rs.getString("owner_user_id")),
                 projectId
         );
-        if (names.isEmpty()) {
+        if (projects.isEmpty()) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "目标项目不存在");
         }
-        String projectName = names.get(0);
+        ProjectRef project = projects.get(0);
+        if (!DataScope.canSeeAll(principal) && !DataScope.isOwner(principal, project.ownerUserId())) {
+            throw new ApiException(ErrorCode.FORBIDDEN, "只能向自己新建的项目上传文件");
+        }
+        String projectName = project.projectName();
 
         String fileId = "file_" + System.currentTimeMillis();
         Path dest = receiveDir.toAbsolutePath().normalize().resolve(fileId).resolve(original);
@@ -211,6 +238,9 @@ public class JdbcFileIngestService implements FileIngestService {
 
     static double bytesToMb(long sizeBytes) {
         return Math.round(sizeBytes / 1024.0 / 1024.0 * 100.0) / 100.0;
+    }
+
+    private record ProjectRef(String projectName, String ownerUserId) {
     }
 
     static long sizeOf(Path dest) {

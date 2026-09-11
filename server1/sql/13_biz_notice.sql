@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS biz_notice (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  notice_id VARCHAR(64) NOT NULL,
+  notice_type VARCHAR(32) NOT NULL COMMENT 'urge=催办',
+  title VARCHAR(200) NOT NULL,
+  content VARCHAR(1000) NOT NULL DEFAULT '',
+  circulation_id VARCHAR(64) NULL,
+  project_id VARCHAR(64) NULL,
+  project_name VARCHAR(200) NULL,
+  file_id VARCHAR(64) NULL,
+  apply_type VARCHAR(32) NULL,
+  sender_user_id VARCHAR(64) NULL,
+  sender_name VARCHAR(128) NULL,
+  recipient_user_id VARCHAR(64) NOT NULL,
+  read_flag TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_notice_id (notice_id),
+  KEY idx_notice_recipient (recipient_user_id, read_flag, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='站内消息：催办等通知审核人';

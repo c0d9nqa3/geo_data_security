@@ -16,6 +16,10 @@ public class InMemoryAuditRecorder implements AuditRecorder {
 
     @Override
     public void record(AuditEventCommand command) {
+        if (command != null && command.action() != null
+                && ("login".equalsIgnoreCase(command.action()) || "logout".equalsIgnoreCase(command.action()))) {
+            return;
+        }
         events.add(command);
     }
 

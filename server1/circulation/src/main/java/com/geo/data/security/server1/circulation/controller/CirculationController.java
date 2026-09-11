@@ -29,10 +29,11 @@ public class CirculationController {
     @GetMapping
     public ApiResponse<CirculationPageDto> list(
             @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "applyType", required = false) String applyType,
             @RequestParam(value = "page", required = false) Integer page,
             @RequestParam(value = "pageSize", required = false) Integer pageSize) {
         return ApiResponse.ok(RequestContext.requestId(),
-                circulationService.listCirculations(status, page, pageSize));
+                circulationService.listCirculations(status, applyType, page, pageSize));
     }
 
     @GetMapping("/{id}")

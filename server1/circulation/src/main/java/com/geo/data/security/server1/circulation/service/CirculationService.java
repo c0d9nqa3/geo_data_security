@@ -7,7 +7,7 @@ import com.geo.data.security.server1.circulation.controller.dto.ReviewActionRequ
 
 public interface CirculationService {
 
-    CirculationPageDto listCirculations(String status, Integer page, Integer pageSize);
+    CirculationPageDto listCirculations(String status, String applyType, Integer page, Integer pageSize);
 
     CirculationDto getCirculation(String circulationId);
 

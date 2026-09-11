@@ -3,11 +3,13 @@ import { request } from '@/shared/http'
 
 export async function fetchCirculations(query?: {
   status?: string
+  applyType?: string
   page?: number
   pageSize?: number
 }): Promise<CirculationPage> {
   const params = new URLSearchParams()
   if (query?.status) params.set('status', query.status)
+  if (query?.applyType) params.set('applyType', query.applyType)
   if (query?.page) params.set('page', String(query.page))
   if (query?.pageSize) params.set('pageSize', String(query.pageSize))
   const q = params.toString()

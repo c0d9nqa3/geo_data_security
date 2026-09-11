@@ -18,14 +18,16 @@ server1/sql/02_schema_server1.sql
 server1/sql/03_seed_test_data.sql
 ```
 
-已有库若缺流转单新字段，再执行 `04_alter_circulation.sql`；若缺 `apply_type`，再执行 `05_alter_apply_type.sql`；若字段注释为空，再执行 `06_comment_circulation.sql`；若缺逻辑删除字段，再执行 `07_alter_deleted.sql`；若要把登录密码改成明文列，再执行 `08_plain_password.sql`。
+已有库若缺流转单新字段，再执行 `04_alter_circulation.sql`；若缺 `apply_type`，再执行 `05_alter_apply_type.sql`；若字段注释为空，再执行 `06_comment_circulation.sql`；若缺逻辑删除字段，再执行 `07_alter_deleted.sql`；若要把登录密码改成明文列，再执行 `08_plain_password.sql`；若页面中文显示为 `?`，再执行 `09_fix_garbled_chinese.sql`；若要清掉已写入的登录/退出审计，再执行 `10_remove_login_logout_audit.sql`；若审计详情仍是问号，再执行 `11_fix_audit_detail.sql`；若要补张三/李四普通员工账号，再执行 `12_staff_users.sql`。
 
 演示账号：
 
 | 用户名 | 密码 | 角色 |
 |---|---|---|
-| admin | admin123 | 管理员 |
-| operator | operator123 | 操作员 |
+| admin | admin123 | 管理员（看全部、审批、分发） |
+| zhangsan | zhangsan123 | 普通员工（只看自己提交的数据） |
+| lisi | lisi123 | 普通员工（只看自己提交的数据） |
+| operator | operator123 | 普通员工（兼容旧账号） |
 
 后端（`app`）默认连接：`127.0.0.1:3306` / 库 `geo_server1` / 用户 `root` / 密码 `123456`（可用环境变量 `SERVER1_DB_*` 覆盖）。
 
@@ -52,8 +54,8 @@ server1/sql/03_seed_test_data.sql
 
 | 前端操作 | 接口 | 读写表 | 逻辑要点 |
 |---|---|---|---|
-| 进入平台 | `POST /api/auth/login` | 读 `sys_user`/`sys_user_role`/`sys_role_permission`；写 `biz_audit_event` | 校验密码哈希，签发 JWT，内存登记会话 |
-| （布局内退出） | `POST /api/auth/logout` | 写 `biz_audit_event` | 删内存会话 |
+| 进入平台 | `POST /api/auth/login` | 读 `sys_user`/`sys_user_role`/`sys_role_permission` | 校验密码，签发 JWT，内存登记会话；不写审计表 |
+| （布局内退出） | `POST /api/auth/logout` | 无 | 删内存会话；不写审计表 |
 | 当前用户 | `GET /api/auth/me` | 读用户/角色缓存信息 | 必须带 Bearer Token |
 
 ### 3.2 工作台
@@ -86,14 +88,16 @@ server1/sql/03_seed_test_data.sql
 
 | 前端操作 | 接口 | 表 | 逻辑 |
 |---|---|---|---|
-| 列表/状态筛选 | `GET /api/tasks?projectId=&status=` | `biz_task` + `biz_project` + `biz_file` | Token 鉴权 + 项目权限 |
-| 提交任务 | `POST /api/tasks` | 写 `biz_task`、`biz_circulation`、`biz_audit_event` | 写入任务并自动打开流转待办；通过并分发后才交给服务器2执行 |
+| 列表/状态筛选 | `GET /api/tasks?projectId=&status=&page=&pageSize=` | `biz_task` + 流转 + 结果索引 | Token 鉴权 |
+| 发起处理 | `POST /api/tasks` | 写 `biz_task`、`biz_circulation`、`biz_audit_event` | 仅已入库（`transferred`）文件；提交后走流转审批 |
+| 同步处理 | `POST /api/tasks/{id}/sync` | 更新 `biz_task` / `biz_result_index` | 分发后回写进度与结果索引 |
+| 结果索引 | `POST /api/tasks/{id}/download` | 读 `biz_result_index`，写审计 | 不落原始结果文件 |
 
 ### 3.6 审计追溯（`audit` 模块）
 
 | 前端操作 | 接口 | 表 |
 |---|---|---|
-| 动作/结果筛选列表 | `GET /api/audit/events?action=&result=` | `biz_audit_event` |
+| 动作/结果筛选列表 | `GET /api/audit/events?action=&result=&page=&pageSize=` | `biz_audit_event` 分页 |
 
 ### 3.7 流转控制（`circulation` 模块）
 
@@ -121,8 +125,10 @@ GET    /api/files
 POST   /api/files/upload
 
 GET    /api/tasks
-POST   /api/tasks
 GET    /api/tasks/{taskId}
+POST   /api/tasks
+POST   /api/tasks/{taskId}/sync
+POST   /api/tasks/{taskId}/download
 
 GET    /api/audit/events
 

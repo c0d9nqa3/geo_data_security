@@ -37,6 +37,24 @@ public class InMemoryUserAccountService implements UserAccountService {
                 Set.of("upload", "project", "task", "download", "trace"),
                 true
         ));
+        users.put("zhangsan", new AuthUser(
+                "u_zhangsan",
+                "zhangsan",
+                "zhangsan123",
+                "张三",
+                "operator",
+                Set.of("upload", "project", "task", "download", "trace"),
+                true
+        ));
+        users.put("lisi", new AuthUser(
+                "u_lisi",
+                "lisi",
+                "lisi123",
+                "李四",
+                "operator",
+                Set.of("upload", "project", "task", "download", "trace"),
+                true
+        ));
     }
 
     @Override

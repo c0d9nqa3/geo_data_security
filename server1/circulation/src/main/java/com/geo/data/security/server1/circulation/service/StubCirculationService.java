@@ -10,6 +10,7 @@ import com.geo.data.security.server1.common.context.RequestContext;
 import com.geo.data.security.server1.common.error.ApiException;
 import com.geo.data.security.server1.common.error.ErrorCode;
 import com.geo.data.security.server1.common.support.Checks;
+import com.geo.data.security.server1.common.support.DataScope;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -37,17 +38,14 @@ public class StubCirculationService implements CirculationService, CirculationIn
     }
 
     @Override
-    public CirculationPageDto listCirculations(String status, Integer page, Integer pageSize) {
+    public CirculationPageDto listCirculations(String status, String applyType, Integer page, Integer pageSize) {
         AccessPrincipal principal = RequestContext.requirePrincipal();
         List<CirculationDto> filtered = items.stream()
                 .filter(item -> !deletedIds.contains(item.id()))
-                .filter(item -> {
-                    if (principal.hasPermission("review")) {
-                        return true;
-                    }
-                    return principal.userId().equals(item.applyUserId()) && !"pending".equals(item.status());
-                })
+                .filter(item -> !"withdrawn".equals(item.status()))
+                .filter(item -> DataScope.canSeeAll(principal) || DataScope.isOwner(principal, item.applyUserId()))
                 .filter(item -> status == null || status.isBlank() || status.equals(item.status()))
+                .filter(item -> applyType == null || applyType.isBlank() || applyType.equals(item.applyType()))
                 .toList();
         return CirculationPageDto.slice(filtered, page, pageSize);
     }
@@ -71,6 +69,22 @@ public class StubCirculationService implements CirculationService, CirculationIn
     }
 
     @Override
+    public void openInheritedDispatch(String applyType, String projectId, String fileId, String taskId, String purpose) {
+        AccessPrincipal principal = RequestContext.requirePrincipal();
+        String id = "cir_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        items.add(0, new CirculationDto(
+                id, applyType, projectId, projectId, taskId, fileId, fileId, null,
+                principal.userId(), principal.displayName(), principal.displayName(), "approved",
+                purpose, "源文件已完成入库分发授权，处理作业沿用该授权直接转交服务器2",
+                "project_members", "", "dispatched", "", "now"
+        ));
+        auditRecorder.record("apply_circulation", projectId, fileId, taskId,
+                "提交 " + id + "（沿用入库授权）", "success");
+        auditRecorder.record("distribute", projectId, fileId, taskId,
+                "沿用入库授权，向服务器2提交 " + id, "success");
+    }
+
+    @Override
     public CirculationDto apply(CreateCirculationRequest request) {
         throw new ApiException(ErrorCode.BAD_REQUEST, "请在项目管理、文件管理或任务管理中提交，流转待办会自动生成");
     }
@@ -87,11 +101,12 @@ public class StubCirculationService implements CirculationService, CirculationIn
 
     @Override
     public CirculationDto distribute(String circulationId) {
-        AccessPrincipal principal = RequestContext.requirePrincipal();
-        Checks.requirePermission(principal, "review");
         CirculationDto current = requireVisible(circulationId);
         if (!"approved".equals(current.status())) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "仅审核通过后可提交分发授权");
+        }
+        if ("dispatched".equals(current.distributeStatus())) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "分发授权已提交");
         }
         CirculationDto updated = copy(current, current.status(), current.comment(), current.reviewUser(), "dispatched");
         replace(updated);
@@ -102,6 +117,7 @@ public class StubCirculationService implements CirculationService, CirculationIn
 
     @Override
     public void deleteCirculation(String circulationId) {
+        Checks.requirePermission(RequestContext.requirePrincipal(), "review");
         CirculationDto current = requireVisible(circulationId);
         deletedIds.add(circulationId);
         auditRecorder.record("delete_circulation", current.projectId(), current.fileId(), current.taskId(),
@@ -133,15 +149,10 @@ public class StubCirculationService implements CirculationService, CirculationIn
         AccessPrincipal principal = RequestContext.requirePrincipal();
         for (CirculationDto item : items) {
             if (item.id().equals(circulationId)) {
-                if (deletedIds.contains(circulationId)) {
+                if (deletedIds.contains(circulationId) || "withdrawn".equals(item.status())) {
                     throw new ApiException(ErrorCode.NOT_FOUND, "流转单不存在");
                 }
-                if (principal.hasPermission("review")) {
-                    return item;
-                }
-                if (!principal.userId().equals(item.applyUserId()) || "pending".equals(item.status())) {
-                    throw new ApiException(ErrorCode.FORBIDDEN, "无权查看该待办");
-                }
+                DataScope.requireVisible(principal, item.applyUserId());
                 return item;
             }
         }

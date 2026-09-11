@@ -7,7 +7,6 @@ import com.geo.data.security.server1.auth.service.AuthService;
 import com.geo.data.security.server1.auth.controller.dto.LoginRequest;
 import com.geo.data.security.server1.auth.controller.dto.LoginResultDto;
 import com.geo.data.security.server1.auth.controller.dto.UserInfoDto;
-import com.geo.data.security.server1.audit.service.AuditRecorder;
 import com.geo.data.security.server1.common.context.AccessPrincipal;
 import com.geo.data.security.server1.common.context.RequestContext;
 import com.geo.data.security.server1.common.error.ApiException;
@@ -27,11 +26,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
-    private final AuditRecorder auditRecorder;
 
-    public AuthController(AuthService authService, AuditRecorder auditRecorder) {
+    public AuthController(AuthService authService) {
         this.authService = authService;
-        this.auditRecorder = auditRecorder;
     }
 
     @PostMapping("/login")
@@ -47,11 +44,6 @@ public class AuthController {
                     result.principal().permissions()
             );
             RequestContext.setPrincipal(principal);
-            try {
-                auditRecorder.record("login", null, null, null, "终端登录成功", "success");
-            } catch (Exception ignored) {
-                // 审计失败不阻断登录
-            }
             UserInfoDto user = new UserInfoDto(
                     principal.userId(),
                     principal.username(),

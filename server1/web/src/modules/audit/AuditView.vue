@@ -1,9 +1,9 @@
 <template>
   <div class="page">
+    <p class="hint">登录用户均可查看全平台审计事件，不区分提交人。</p>
     <div class="toolbar">
       <select v-model="actionFilter">
         <option value="">全部动作</option>
-        <option value="login">登录</option>
         <option value="upload">上传</option>
         <option value="create_project">创建项目</option>
         <option value="submit_task">提交任务</option>
@@ -13,7 +13,11 @@
         <option value="distribute">分发授权</option>
         <option value="delete_circulation">删除流转单</option>
         <option value="download_result">结果下载</option>
+        <option value="process_complete">处理完成</option>
         <option value="query_trace">追溯查询</option>
+        <option value="urge">催办</option>
+        <option value="resubmit">重新提交</option>
+        <option value="withdraw">撤回</option>
       </select>
       <select v-model="resultFilter">
         <option value="">全部结果</option>
@@ -23,9 +27,9 @@
       </select>
     </div>
 
-    <div v-if="loading" class="empty">加载中…</div>
-    <div v-else class="table-wrap">
-      <table>
+    <div class="table-wrap">
+      <div v-if="loading" class="empty-inline">加载中…</div>
+      <table v-else>
         <thead>
           <tr>
             <th>时间</th>
@@ -47,6 +51,8 @@
           </tr>
         </tbody>
       </table>
+      <div v-if="!loading && !events.length" class="empty-inline">暂无审计事件</div>
+      <PagerBar v-model:page="page" v-model:page-size="pageSize" :total="total" :total-pages="totalPages" :loading="loading" />
     </div>
   </div>
 </template>
@@ -54,29 +60,36 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { fetchAudits } from '@/modules/audit/api'
+import PagerBar from '@/shared/PagerBar.vue'
 import type { AuditAction, AuditEvent } from '@/types'
 
 const loading = ref(true)
 const events = ref<AuditEvent[]>([])
+const total = ref(0)
+const totalPages = ref(1)
+const page = ref(1)
+const pageSize = ref(10)
 const actionFilter = ref('')
 const resultFilter = ref('')
 
-function actionText(a: AuditAction) {
-  return (
-    {
-      login: '登录',
-      upload: '上传',
-      create_project: '创建项目',
-      submit_task: '提交任务',
-      approve: '审批',
-      reject: '驳回',
-      apply_circulation: '流转申请',
-      distribute: '分发授权',
-      delete_circulation: '删除流转单',
-      download_result: '结果下载',
-      query_trace: '追溯查询',
-    } as const
-  )[a]
+function actionText(a: AuditAction | string) {
+  const map: Record<string, string> = {
+    upload: '上传',
+    create_project: '创建项目',
+    submit_task: '提交任务',
+    approve: '审批',
+    reject: '驳回',
+    apply_circulation: '流转申请',
+    distribute: '分发授权',
+    delete_circulation: '删除流转单',
+    download_result: '结果下载',
+    process_complete: '处理完成',
+    query_trace: '追溯查询',
+    urge: '催办',
+    resubmit: '重新提交',
+    withdraw: '撤回',
+  }
+  return map[a] ?? a
 }
 
 function resultText(r: AuditEvent['result']) {
@@ -86,14 +99,34 @@ function resultText(r: AuditEvent['result']) {
 async function load() {
   loading.value = true
   try {
-    events.value = await fetchAudits(actionFilter.value || undefined, resultFilter.value || undefined)
+    const data = await fetchAudits({
+      action: actionFilter.value || undefined,
+      result: resultFilter.value || undefined,
+      page: page.value,
+      pageSize: pageSize.value,
+    })
+    events.value = data.items
+    total.value = data.total
+    totalPages.value = data.totalPages
+    page.value = data.page
+    pageSize.value = data.pageSize
+  } catch {
+    events.value = []
+    total.value = 0
+    totalPages.value = 1
   } finally {
     loading.value = false
   }
 }
 
 onMounted(load)
-watch([actionFilter, resultFilter], load)
+watch([actionFilter, resultFilter], () => {
+  page.value = 1
+})
+watch(pageSize, () => {
+  page.value = 1
+})
+watch([page, pageSize, actionFilter, resultFilter], load)
 </script>
 
 <style scoped>
@@ -107,6 +140,17 @@ watch([actionFilter, resultFilter], load)
   gap: 10px;
 }
 
+.hint {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(78, 168, 222, 0.08);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 select {
   min-width: 160px;
   border: 1px solid var(--border);
@@ -116,15 +160,15 @@ select {
   padding: 11px 12px;
 }
 
-.table-wrap,
-.empty {
+.table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: rgba(28, 37, 48, 0.88);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
 }
 
-.empty {
-  padding: 40px;
+.empty-inline {
+  padding: 24px 14px;
   text-align: center;
   color: var(--text-muted);
 }
@@ -145,6 +189,7 @@ td {
 th {
   font-size: 12px;
   color: var(--text-muted);
+  background: rgba(15, 157, 142, 0.06);
 }
 
 tr:last-child td {

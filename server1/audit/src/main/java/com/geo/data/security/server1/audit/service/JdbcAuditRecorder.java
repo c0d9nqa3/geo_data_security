@@ -23,6 +23,9 @@ public class JdbcAuditRecorder implements AuditRecorder {
 
     @Override
     public void record(AuditEventCommand command) {
+        if (isAuthSessionAction(command.action())) {
+            return;
+        }
         AccessPrincipal principal = RequestContext.principal();
         String actorUserId = principal == null ? null : principal.userId();
         String actorName = principal == null ? "系统" : principal.displayName();
@@ -58,5 +61,9 @@ public class JdbcAuditRecorder implements AuditRecorder {
                 RequestContext.clientIp(),
                 RequestContext.requestId()
         );
+    }
+
+    private static boolean isAuthSessionAction(String action) {
+        return "login".equalsIgnoreCase(action) || "logout".equalsIgnoreCase(action);
     }
 }

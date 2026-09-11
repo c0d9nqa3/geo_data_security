@@ -7,7 +7,9 @@ import com.geo.data.security.server1.common.context.RequestContext;
 import com.geo.data.security.server1.common.error.ApiException;
 import com.geo.data.security.server1.common.error.ErrorCode;
 import com.geo.data.security.server1.common.support.Checks;
+import com.geo.data.security.server1.common.support.DataScope;
 import com.geo.data.security.server1.common.support.TimeFormats;
+import com.geo.data.security.server1.common.web.PageDto;
 import com.geo.data.security.server1.project.controller.dto.CreateProjectRequest;
 import com.geo.data.security.server1.project.controller.dto.ProjectDto;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -17,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -35,10 +38,25 @@ public class JdbcProjectService implements ProjectService {
     }
 
     @Override
-    public List<ProjectDto> listProjects() {
-        RequestContext.requirePrincipal();
-        return jdbc.query(
-                """
+    public PageDto<ProjectDto> listProjects(String keyword, Integer page, Integer pageSize) {
+        AccessPrincipal principal = RequestContext.requirePrincipal();
+        StringBuilder where = new StringBuilder(" WHERE 1=1");
+        List<Object> args = new ArrayList<>();
+        DataScope.restrictToOwner(where, args, principal, "p.owner_user_id");
+        String q = keyword == null ? "" : keyword.trim();
+        if (!q.isEmpty()) {
+            where.append(" AND (p.project_name LIKE ? OR p.project_code LIKE ?)");
+            String like = "%" + q + "%";
+            args.add(like);
+            args.add(like);
+        }
+        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM biz_project p" + where, Long.class, args.toArray());
+        long count = total == null ? 0 : total;
+        int size = PageDto.normalizeSize(pageSize);
+        int pages = PageDto.totalPages(count, size);
+        int current = PageDto.normalizePage(page, pages);
+        int offset = (current - 1) * size;
+        String sql = """
                 SELECT p.project_id, p.project_name, p.project_code, p.status, p.description,
                        COALESCE(p.updated_at, p.created_at) AS touch_at,
                        COALESCE(ou.display_name, p.owner_user_id) AS owner_name,
@@ -46,19 +64,32 @@ public class JdbcProjectService implements ProjectService {
                        (SELECT COUNT(*) FROM biz_file f WHERE f.project_id = p.project_id) AS file_count
                 FROM biz_project p
                 LEFT JOIN sys_user ou ON ou.user_id = p.owner_user_id
-                ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.id DESC
-                """,
-                (rs, i) -> new ProjectDto(
-                        rs.getString("project_id"),
-                        rs.getString("project_name"),
-                        rs.getString("project_code"),
-                        rs.getString("status"),
-                        rs.getString("owner_name"),
-                        rs.getInt("member_count"),
-                        rs.getInt("file_count"),
-                        TimeFormats.format(rs.getTimestamp("touch_at")),
-                        TimeFormats.nullToEmpty(rs.getString("description"))
-                )
+                """ + where + " ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.id DESC LIMIT ?, ?";
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(offset);
+        pageArgs.add(size);
+        List<ProjectDto> items = jdbc.query(sql, this::mapProject, pageArgs.toArray());
+        return PageDto.of(items, count, current, size);
+    }
+
+    @Override
+    public long countAll() {
+        RequestContext.requirePrincipal();
+        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM biz_project", Long.class);
+        return total == null ? 0 : total;
+    }
+
+    private ProjectDto mapProject(java.sql.ResultSet rs, int i) throws java.sql.SQLException {
+        return new ProjectDto(
+                rs.getString("project_id"),
+                rs.getString("project_name"),
+                rs.getString("project_code"),
+                rs.getString("status"),
+                rs.getString("owner_name"),
+                rs.getInt("member_count"),
+                rs.getInt("file_count"),
+                TimeFormats.format(rs.getTimestamp("touch_at")),
+                TimeFormats.nullToEmpty(rs.getString("description"))
         );
     }
 
@@ -66,6 +97,7 @@ public class JdbcProjectService implements ProjectService {
     @Transactional
     public ProjectDto createProject(CreateProjectRequest request) {
         AccessPrincipal principal = RequestContext.requirePrincipal();
+        Checks.requirePermission(principal, "project");
         String name = Checks.requireText(request.name(), "项目名称不能为空");
         String code = Checks.requireText(request.code(), "项目编号不能为空");
         String description = request.description() == null ? "" : request.description().trim();

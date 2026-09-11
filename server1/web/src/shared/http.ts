@@ -2,6 +2,7 @@ import type { UserInfo } from '@/types'
 
 const AUTH_KEY = 'geo_server1_token'
 const USER_KEY = 'geo_server1_user'
+const DEFAULT_TIMEOUT_MS = 20_000
 
 interface ApiEnvelope<T> {
   code: string
@@ -35,16 +36,46 @@ export function clearSession() {
   localStorage.removeItem(USER_KEY)
 }
 
+function redirectToLogin() {
+  if (window.location.pathname.startsWith('/login')) return
+  window.location.replace('/login')
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
-  if (!(init?.body instanceof FormData)) {
+  const isUpload = init?.body instanceof FormData
+  if (!isUpload) {
     headers.set('Content-Type', 'application/json')
   }
   const token = getToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
-  const res = await fetch(`/api${path}`, { ...init, headers })
+  const timeoutMs = isUpload ? 0 : DEFAULT_TIMEOUT_MS
+  const controller = new AbortController()
+  const timeoutId =
+    timeoutMs > 0 ? window.setTimeout(() => controller.abort(), timeoutMs) : undefined
+  if (init?.signal) {
+    init.signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+
+  let res: Response
+  try {
+    res = await fetch(`/api${path}`, { ...init, headers, signal: controller.signal })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('请求超时，请稍后重试')
+    }
+    throw new Error('网络中断，请检查后端是否在运行')
+  } finally {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+  }
+
   const payload = (await res.json().catch(() => null)) as ApiEnvelope<T> | null
+  if (res.status === 401 && path !== '/auth/login') {
+    clearSession()
+    redirectToLogin()
+    throw new Error(payload?.message || '登录已失效，请重新登录')
+  }
   if (!res.ok) {
     throw new Error(payload?.message || `请求失败: ${res.status}`)
   }

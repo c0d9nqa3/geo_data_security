@@ -10,6 +10,7 @@ import com.geo.data.security.server1.common.context.RequestContext;
 import com.geo.data.security.server1.common.error.ApiException;
 import com.geo.data.security.server1.common.error.ErrorCode;
 import com.geo.data.security.server1.common.support.Checks;
+import com.geo.data.security.server1.common.support.DataScope;
 import com.geo.data.security.server1.common.support.TimeFormats;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -50,18 +51,18 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
     }
 
     @Override
-    public CirculationPageDto listCirculations(String status, Integer page, Integer pageSize) {
+    public CirculationPageDto listCirculations(String status, String applyType, Integer page, Integer pageSize) {
         AccessPrincipal principal = RequestContext.requirePrincipal();
-        boolean reviewer = principal.hasPermission("review");
-        StringBuilder where = new StringBuilder(" WHERE c.deleted = 0");
+        StringBuilder where = new StringBuilder(" WHERE c.deleted = 0 AND c.status <> 'withdrawn'");
         List<Object> args = new ArrayList<>();
-        if (!reviewer) {
-            where.append(" AND c.apply_user_id = ? AND c.status <> 'pending'");
-            args.add(principal.userId());
-        }
+        DataScope.restrictToOwner(where, args, principal, "c.apply_user_id");
         if (status != null && !status.isBlank()) {
             where.append(" AND c.status = ?");
             args.add(status.trim());
+        }
+        if (applyType != null && !applyType.isBlank()) {
+            where.append(" AND c.apply_type = ?");
+            args.add(applyType.trim());
         }
         Long total = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM biz_circulation c" + where,
@@ -73,7 +74,7 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
         int pages = CirculationPageDto.totalPages(count, size);
         int current = CirculationPageDto.normalizePage(page, pages);
         int offset = (current - 1) * size;
-        String sql = LIST_SQL + where + " ORDER BY c.created_at DESC, c.id DESC LIMIT ?, ?";
+        String sql = LIST_SQL + where + " ORDER BY COALESCE(c.updated_at, c.created_at) DESC, c.id DESC LIMIT ?, ?";
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(offset);
         pageArgs.add(size);
@@ -110,6 +111,33 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
     }
 
     @Override
+    @Transactional
+    public void openInheritedDispatch(String applyType, String projectId, String fileId, String taskId, String purpose) {
+        AccessPrincipal principal = RequestContext.requirePrincipal();
+        String type = applyType == null || applyType.isBlank() ? "task" : applyType.trim();
+        String circulationId = "cir_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        LocalDateTime now = LocalDateTime.now();
+        Timestamp ts = Timestamp.valueOf(now);
+        String comment = "源文件已完成入库分发授权，处理作业沿用该授权直接转交服务器2";
+        jdbc.update(
+                """
+                INSERT INTO biz_circulation
+                  (circulation_id, project_id, task_id, file_id, apply_user_id, apply_type,
+                   status, purpose, comment_text, authorize_scope, expire_at, distribute_status,
+                   review_user_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'approved', ?, ?, 'project_members', ?, 'dispatched', ?, ?, ?)
+                """,
+                circulationId, projectId, taskId, fileId, principal.userId(), type,
+                purpose == null ? "" : purpose, comment,
+                Timestamp.valueOf(now.plusHours(72)), principal.userId(), ts, ts
+        );
+        auditRecorder.record("apply_circulation", projectId, fileId, taskId,
+                "提交" + typeLabel(type) + " " + circulationId + "（沿用入库授权）", "success");
+        auditRecorder.record("distribute", projectId, fileId, taskId,
+                "沿用入库授权，向服务器2提交" + typeLabel(type) + " " + circulationId, "success");
+    }
+
+    @Override
     public CirculationDto apply(CreateCirculationRequest request) {
         throw new ApiException(ErrorCode.BAD_REQUEST, "请在项目管理、文件管理或任务管理中提交，流转待办会自动生成");
     }
@@ -130,11 +158,11 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
     @Transactional
     public CirculationDto distribute(String circulationId) {
         AccessPrincipal principal = RequestContext.requirePrincipal();
-        Checks.requirePermission(principal, "review");
         CirculationDto current = loadById(circulationId);
         if (current == null) {
             throw new ApiException(ErrorCode.NOT_FOUND, "流转单不存在");
         }
+        DataScope.requireVisible(principal, current.applyUserId());
         if (!"approved".equals(current.status())) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "仅审核通过后可提交分发授权");
         }
@@ -144,31 +172,54 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
         LocalDateTime now = LocalDateTime.now();
         Timestamp ts = Timestamp.valueOf(now);
         String type = current.applyType();
-        if ("project".equals(type) && current.projectId() != null) {
-            jdbc.update("UPDATE biz_project SET status = 'active', updated_at = ? WHERE project_id = ?",
-                    ts, current.projectId());
+        try {
+            if ("project".equals(type) && current.projectId() != null) {
+                jdbc.update("UPDATE biz_project SET status = 'active', updated_at = ? WHERE project_id = ?",
+                        ts, current.projectId());
+            }
+            if ("file".equals(type) && current.fileId() != null) {
+                jdbc.update("UPDATE biz_file SET status = 'transferred', updated_at = ? WHERE file_id = ?",
+                        ts, current.fileId());
+            }
+            if ("task".equals(type) && current.taskId() != null) {
+                jdbc.update(
+                        """
+                        UPDATE biz_task
+                        SET status = 'running', progress = 10, server2_job_ref = COALESCE(server2_job_ref, ?),
+                            updated_at = ?
+                        WHERE task_id = ?
+                        """,
+                        "s2job_" + circulationId, ts, current.taskId()
+                );
+            }
+            jdbc.update(
+                    "UPDATE biz_circulation SET distribute_status = 'dispatched', updated_at = ? WHERE circulation_id = ? AND deleted = 0",
+                    ts, circulationId
+            );
+            auditRecorder.record("distribute", current.projectId(), current.fileId(), current.taskId(),
+                    "向服务器2提交" + typeLabel(type) + "授权 " + circulationId, "success");
+            return loadById(circulationId);
+        } catch (ApiException e) {
+            throw e;
+        } catch (Exception e) {
+            jdbc.update(
+                    "UPDATE biz_circulation SET distribute_status = 'failed', comment_text = ?, updated_at = ? WHERE circulation_id = ? AND deleted = 0",
+                    "分发失败：" + e.getMessage(), ts, circulationId
+            );
+            auditRecorder.record("distribute", current.projectId(), current.fileId(), current.taskId(),
+                    "向服务器2提交" + typeLabel(type) + "授权失败 " + circulationId, "error");
+            throw new ApiException(ErrorCode.BAD_REQUEST, "分发授权失败，可在任务管理中重新提交");
         }
-        if ("file".equals(type) && current.fileId() != null) {
-            jdbc.update("UPDATE biz_file SET status = 'transferred', updated_at = ? WHERE file_id = ?",
-                    ts, current.fileId());
-        }
-        if ("task".equals(type) && current.taskId() != null) {
-            jdbc.update("UPDATE biz_task SET status = 'running', progress = 10, updated_at = ? WHERE task_id = ?",
-                    ts, current.taskId());
-        }
-        jdbc.update(
-                "UPDATE biz_circulation SET distribute_status = 'dispatched', updated_at = ? WHERE circulation_id = ? AND deleted = 0",
-                ts, circulationId
-        );
-        auditRecorder.record("distribute", current.projectId(), current.fileId(), current.taskId(),
-                "向服务器2提交" + typeLabel(type) + "授权 " + circulationId, "success");
-        return loadById(circulationId);
     }
 
     @Override
     @Transactional
     public void deleteCirculation(String circulationId) {
-        CirculationDto current = loadVisible(circulationId);
+        Checks.requirePermission(RequestContext.requirePrincipal(), "review");
+        CirculationDto current = loadById(circulationId);
+        if (current == null) {
+            throw new ApiException(ErrorCode.NOT_FOUND, "流转单不存在");
+        }
         LocalDateTime now = LocalDateTime.now();
         jdbc.update(
                 "UPDATE biz_circulation SET deleted = 1, updated_at = ? WHERE circulation_id = ? AND deleted = 0",
@@ -199,6 +250,14 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
                 status, principal.userId(), comment, Timestamp.valueOf(now), circulationId
         );
         String action = "approved".equals(status) ? "approve" : "reject";
+        if ("task".equals(current.applyType()) && current.taskId() != null) {
+            if ("rejected".equals(status)) {
+                jdbc.update(
+                        "UPDATE biz_task SET status = 'rejected', updated_at = ? WHERE task_id = ?",
+                        Timestamp.valueOf(now), current.taskId()
+                );
+            }
+        }
         auditRecorder.record(action, current.projectId(), current.fileId(), current.taskId(),
                 ("approved".equals(status) ? "通过" : "驳回") + typeLabel(current.applyType())
                         + " " + circulationId, "success");
@@ -211,18 +270,13 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
         if (found == null) {
             throw new ApiException(ErrorCode.NOT_FOUND, "流转单不存在");
         }
-        if (principal.hasPermission("review")) {
-            return found;
-        }
-        if (!principal.userId().equals(found.applyUserId()) || "pending".equals(found.status())) {
-            throw new ApiException(ErrorCode.FORBIDDEN, "无权查看该待办");
-        }
+        DataScope.requireVisible(principal, found.applyUserId());
         return found;
     }
 
     private CirculationDto loadById(String circulationId) {
         List<CirculationDto> found = jdbc.query(
-                LIST_SQL + " WHERE c.deleted = 0 AND c.circulation_id = ? LIMIT 1",
+                LIST_SQL + " WHERE c.deleted = 0 AND c.status <> 'withdrawn' AND c.circulation_id = ? LIMIT 1",
                 this::mapCirculation,
                 circulationId
         );

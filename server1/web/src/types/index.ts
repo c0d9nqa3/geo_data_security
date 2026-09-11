@@ -8,6 +8,14 @@ export interface UserInfo {
   permissions?: string[]
 }
 
+export interface PageResult<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
 export type ProjectStatus = 'active' | 'archived' | 'draft'
 
 export interface Project {
@@ -40,32 +48,93 @@ export interface DataFile {
 }
 
 export type TaskStatus =
+  | 'pending'
+  | 'distributing'
+  | 'completed'
+  | 'rejected'
+  | 'failed'
+  | 'withdrawn'
+  | 'deleted'
   | 'queued'
   | 'running'
   | 'waiting_review'
   | 'approved'
-  | 'rejected'
-  | 'failed'
+
+export interface TaskNode {
+  key: string
+  label: string
+  state: string
+  actor?: string
+  time?: string
+  remark?: string
+}
 
 export interface TaskItem {
   id: string
+  applyType?: string
+  title?: string
   projectId: string
   projectName: string
-  fileId: string
-  fileName: string
+  fileId?: string
+  fileName?: string
+  applyUserId?: string
+  applyUser?: string
+  reviewUser?: string
   type: string
-  status: TaskStatus
+  status: TaskStatus | string
   progress: number
-  createdBy: string
+  stage?: string
+  currentNode?: string
+  currentNodeLabel?: string
+  circulationStatus?: string
+  distributeStatus?: string
+  comment?: string
+  purpose?: string
+  urgeCount?: number
+  lastUrgeAt?: string
+  canUrge?: boolean
+  canRetry?: boolean
+  canWithdraw?: boolean
+  canDelete?: boolean
+  canDistribute?: boolean
+  nodes?: TaskNode[]
+  resultId?: string
+  outputReady?: boolean
+  createdBy?: string
   createdAt: string
   updatedAt: string
 }
 
+export interface NoticeItem {
+  id: string
+  type: string
+  title: string
+  content: string
+  circulationId?: string
+  projectId?: string
+  projectName?: string
+  fileId?: string
+  applyType?: string
+  applyTypeLabel?: string
+  senderUserId?: string
+  senderName?: string
+  read: boolean
+  createdAt: string
+}
+
+export interface TaskResultIndex {
+  taskId: string
+  resultId: string
+  resultHash: string
+  chainProof: string
+  message: string
+}
+
 export type AuditAction =
-  | 'login'
   | 'upload'
   | 'create_project'
   | 'submit_task'
+  | 'process_complete'
   | 'approve'
   | 'reject'
   | 'apply_circulation'
@@ -73,6 +142,9 @@ export type AuditAction =
   | 'delete_circulation'
   | 'download_result'
   | 'query_trace'
+  | 'urge'
+  | 'resubmit'
+  | 'withdraw'
 
 export interface AuditEvent {
   id: string

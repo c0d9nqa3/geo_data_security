@@ -1,15 +1,30 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <select v-model="statusFilter">
+      <select v-if="!focusId" v-model="statusFilter">
         <option value="">全部状态</option>
         <option value="pending">待办</option>
         <option value="approved">已通过</option>
         <option value="rejected">已驳回</option>
       </select>
+      <select v-if="!focusId" v-model="typeFilter">
+        <option value="">全部类型</option>
+        <option value="task">处理作业</option>
+        <option value="file">上传文件</option>
+        <option value="project">新建项目</option>
+      </select>
     </div>
-    <p class="hint">
-      在「项目管理 / 文件管理 / 任务管理」提交后，这里自动出现待办。待办仅管理员可见；列表可直接通过或拒绝，通过后在右侧提交分发授权。
+    <p v-if="focusTicket" class="focus-bar">
+      正在办理处理作业 <code>{{ focusTicket.taskId || focusTaskId }}</code>
+      的流转单（{{ focusTicket.fileName || focusTicket.purpose || focusTicket.id }}）。列表已定位到这一条，不会和其他项目 / 文件单据混在一起。
+      <RouterLink class="focus-link" to="/tasks">返回任务管理</RouterLink>
+      <button type="button" class="focus-link" @click="clearFocus">查看全部流转</button>
+    </p>
+    <p v-else class="hint">
+      在「项目管理 / 文件管理」提交后，这里自动出现待审单据。
+      发起人撤回或管理员删除后，本页不再显示；任务管理仍保留「已撤回 / 已删除」记录和流程图。
+      <template v-if="canReview">管理员负责审批。审核通过后，提交人或管理员都可以向服务器2分发授权。</template>
+      <template v-else>你只能看到自己尚未撤回的单据。未审核不能分发；审核通过后可自己向服务器2提交分发授权。</template>
     </p>
 
     <div class="layout">
@@ -24,7 +39,7 @@
                 <th>申请人</th>
                 <th>状态</th>
                 <th>分发</th>
-                <th v-if="canReview">操作</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -40,24 +55,34 @@
                 <td>
                   <div class="name">{{ item.projectName }}</div>
                   <div class="sub">{{ objectText(item) }}</div>
+                  <div v-if="focusId === item.id" class="focus-tag">当前作业流转单</div>
                 </td>
                 <td>{{ item.applyUser }}</td>
                 <td><span class="tag" :data-s="item.status">{{ statusText(item.status) }}</span></td>
                 <td>
                   <span class="dist-pill" :data-d="item.distributeStatus">{{ distributeText(item.distributeStatus) }}</span>
                 </td>
-                <td v-if="canReview">
-                  <div v-if="item.status === 'pending'" class="ops">
+                <td>
+                  <div v-if="canReview && item.status === 'pending'" class="ops">
                     <button type="button" class="btn-pass" :disabled="busy" @click.stop="onApprove(item.id)">通过</button>
                     <button type="button" class="btn-reject" :disabled="busy" @click.stop="onReject(item.id)">拒绝</button>
                   </div>
+                  <button
+                    v-else-if="canDispatch(item)"
+                    type="button"
+                    class="btn-pass"
+                    :disabled="busy"
+                    @click.stop="onDistribute(item.id)"
+                  >
+                    分发
+                  </button>
                   <span v-else class="muted-inline">—</span>
                 </td>
               </tr>
             </tbody>
           </table>
           <div v-if="!items.length" class="empty-inline">
-            {{ canReview ? '暂无流转待办' : '暂无已处理单据。你提交的待办仅管理员可见。' }}
+            {{ canReview ? '暂无流转待办' : '暂无你提交的单据' }}
           </div>
           <div class="pager">
             <div class="pager-meta">
@@ -89,7 +114,7 @@
       </div>
 
       <aside v-if="selected" class="detail">
-        <p class="sheet-kicker">流转明细</p>
+        <p class="sheet-kicker">{{ focusTicket ? '当前处理作业的流转单' : '流转明细' }}</p>
         <h3>{{ typeText(selected.applyType) }} · {{ selected.projectName }}</h3>
         <dl>
           <div><dt>流转单</dt><dd><code>{{ selected.id }}</code></dd></div>
@@ -117,7 +142,7 @@
           </div>
         </dl>
         <button
-          v-if="canReview && selected.status === 'approved' && selected.distributeStatus !== 'dispatched'"
+          v-if="canDispatch(selected)"
           type="button"
           class="btn-auth"
           :disabled="busy"
@@ -133,20 +158,22 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   approveCirculation,
   distributeCirculation,
+  fetchCirculation,
   fetchCirculations,
   rejectCirculation,
 } from '@/modules/circulation/api'
 import { getStoredUser } from '@/modules/auth/api'
+import { canReview as canReviewOf } from '@/shared/access'
 import type { CirculationItem } from '@/types'
 
+const route = useRoute()
+const router = useRouter()
 const user = getStoredUser()
-const canReview = computed(() => {
-  const perms = user?.permissions ?? []
-  return perms.includes('review') || user?.role === 'admin'
-})
+const canReview = computed(() => canReviewOf(user))
 
 const loading = ref(true)
 const items = ref<CirculationItem[]>([])
@@ -156,16 +183,22 @@ const page = ref(1)
 const pageSize = ref(10)
 const jumpPage = ref(1)
 const statusFilter = ref('')
+const typeFilter = ref('')
 const selectedId = ref('')
 const busy = ref(false)
 const errorMsg = ref('')
+const focusTicket = ref<CirculationItem | null>(null)
 
-const selected = computed(() => items.value.find((i) => i.id === selectedId.value) || null)
+const focusId = computed(() => String(route.query.circulationId || '').trim())
+const focusTaskId = computed(() => String(route.query.taskId || '').trim())
+const selected = computed(() => {
+  return items.value.find((i) => i.id === selectedId.value) || focusTicket.value || null
+})
 
 function typeText(type?: string) {
   if (type === 'project') return '新建项目'
   if (type === 'file') return '上传文件'
-  return '提交任务'
+  if (type === 'task') return '处理作业'
 }
 function objectText(item: CirculationItem) {
   return item.fileName || item.taskId || item.purpose || item.id
@@ -177,7 +210,13 @@ function scopeText(scope: string) {
   return scope === 'project_members' ? '项目成员' : '申请人本人'
 }
 function distributeText(s: string) {
-  return s === 'dispatched' ? '已提交授权' : '未分发'
+  if (s === 'dispatched') return '已提交授权'
+  if (s === 'failed') return '分发失败'
+  return '未分发'
+}
+function canDispatch(item: CirculationItem | null | undefined) {
+  if (!item) return false
+  return item.status === 'approved' && item.distributeStatus !== 'dispatched'
 }
 
 function selectRow(id: string) {
@@ -194,8 +233,22 @@ async function reload() {
   loading.value = true
   errorMsg.value = ''
   try {
+    if (focusId.value) {
+      const one = await fetchCirculation(focusId.value)
+      focusTicket.value = one
+      items.value = [one]
+      total.value = 1
+      totalPages.value = 1
+      page.value = 1
+      pageSize.value = pageSize.value || 10
+      jumpPage.value = 1
+      selectedId.value = one.id
+      return
+    }
+    focusTicket.value = null
     const data = await fetchCirculations({
       status: statusFilter.value || undefined,
+      applyType: typeFilter.value || undefined,
       page: page.value,
       pageSize: pageSize.value,
     })
@@ -217,14 +270,31 @@ async function reload() {
   }
 }
 
+function clearFocus() {
+  router.replace({ name: 'circulation' })
+}
+
 onMounted(reload)
 watch(statusFilter, () => {
+  if (focusId.value) return
+  page.value = 1
+})
+watch(typeFilter, () => {
+  if (focusId.value) return
   page.value = 1
 })
 watch(pageSize, () => {
+  if (focusId.value) return
   page.value = 1
 })
-watch([page, pageSize, statusFilter], reload)
+watch(focusId, () => {
+  page.value = 1
+  void reload()
+})
+watch([page, pageSize, statusFilter, typeFilter], () => {
+  if (focusId.value) return
+  void reload()
+})
 
 function patchItem(updated: CirculationItem) {
   items.value = items.value.map((i) => (i.id === updated.id ? updated : i))
@@ -285,6 +355,39 @@ async function onDistribute(id: string) {
   font-size: 13px;
   line-height: 1.55;
 }
+.focus-bar {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(78, 168, 222, 0.28);
+  background: rgba(78, 168, 222, 0.1);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.focus-bar code {
+  color: var(--info);
+}
+.focus-link {
+  margin-left: 10px;
+  border: none;
+  background: none;
+  padding: 0;
+  color: #1d6f9a;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+.focus-tag {
+  margin-top: 6px;
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #1d6f9a;
+  background: rgba(78, 168, 222, 0.16);
+}
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.85fr);
@@ -310,8 +413,8 @@ select {
 .detail {
   border: 1px solid rgba(78, 168, 222, 0.16);
   border-radius: 14px;
-  background: linear-gradient(180deg, rgba(32, 44, 56, 0.94), rgba(22, 30, 40, 0.92));
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
 }
 .empty,
 .empty-inline {
@@ -327,14 +430,14 @@ th,
 td {
   padding: 13px 14px;
   text-align: left;
-  border-bottom: 1px solid rgba(44, 58, 74, 0.85);
+  border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
 th {
   font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--text-muted);
-  background: rgba(15, 22, 30, 0.35);
+  background: rgba(15, 157, 142, 0.06);
 }
 tbody tr {
   cursor: pointer;
@@ -371,15 +474,15 @@ tbody tr:hover {
   font-weight: 600;
 }
 .type-pill[data-t='project'] {
-  color: #7dd3c7;
+  color: #0b6e64;
   background: rgba(42, 157, 143, 0.16);
 }
 .type-pill[data-t='file'] {
-  color: #8ecae6;
+  color: #1d6f9a;
   background: rgba(78, 168, 222, 0.16);
 }
 .type-pill[data-t='task'] {
-  color: #f4d58d;
+  color: #a16207;
   background: rgba(233, 196, 106, 0.16);
 }
 .tag[data-s='pending'] {
@@ -391,12 +494,16 @@ tbody tr:hover {
   background: rgba(82, 183, 136, 0.18);
 }
 .tag[data-s='rejected'] {
-  color: #ff8a70;
+  color: var(--danger);
   background: rgba(231, 111, 81, 0.16);
 }
 .dist-pill[data-d='dispatched'] {
   color: var(--ok);
   background: rgba(82, 183, 136, 0.16);
+}
+.dist-pill[data-d='failed'] {
+  color: var(--danger);
+  background: rgba(231, 111, 81, 0.16);
 }
 .dist-pill[data-d='none'] {
   color: var(--text-muted);
@@ -419,12 +526,12 @@ tbody tr:hover {
 .btn-reject {
   background: transparent;
   border-color: rgba(231, 111, 81, 0.5);
-  color: #ff9b84;
+  color: var(--danger);
 }
 .btn-page {
   background: rgba(78, 168, 222, 0.1);
   border-color: rgba(78, 168, 222, 0.28);
-  color: #9fd4f0;
+  color: #1d6f9a;
 }
 .btn-auth {
   width: 100%;
@@ -448,7 +555,7 @@ tbody tr:hover {
   margin: 0 0 4px;
   font-size: 12px;
   letter-spacing: 0.08em;
-  color: #7dd3c7;
+  color: #0b6e64;
 }
 .detail h3 {
   margin: 0 0 14px;
@@ -474,7 +581,7 @@ dd {
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  color: #9fd4f0;
+  color: #1d6f9a;
 }
 .pager {
   display: flex;
@@ -482,7 +589,7 @@ code {
   gap: 12px 16px;
   align-items: center;
   padding: 12px 14px;
-  border-top: 1px solid rgba(44, 58, 74, 0.85);
+  border-top: 1px solid var(--border);
   color: var(--text-muted);
   font-size: 13px;
 }

@@ -1,21 +1,22 @@
 :root {
-  --bg: #0f1419;
-  --bg-elevated: #171e26;
-  --bg-panel: #1c2530;
-  --bg-hover: #243040;
-  --border: #2c3a4a;
-  --text: #e8eef4;
-  --text-muted: #8fa3b8;
-  --accent: #2a9d8f;
-  --accent-hover: #34b3a3;
-  --accent-soft: rgba(42, 157, 143, 0.15);
-  --warn: #e9c46a;
+  --bg: #f3f8fc;
+  --bg-elevated: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-hover: #e7f3f8;
+  --bg-card: rgba(255, 255, 255, 0.94);
+  --border: rgba(56, 132, 176, 0.18);
+  --text: #16324a;
+  --text-muted: #5f7e93;
+  --accent: #0f9d8e;
+  --accent-hover: #12b3a2;
+  --accent-soft: rgba(15, 157, 142, 0.12);
+  --warn: #d97706;
   --danger: #e76f51;
-  --ok: #52b788;
-  --info: #4ea8de;
-  --radius: 10px;
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
-  --font: 'IBM Plex Sans', 'Noto Sans SC', sans-serif;
+  --ok: #0f9d8e;
+  --info: #2b7de9;
+  --radius: 12px;
+  --shadow: 0 18px 40px rgba(20, 72, 110, 0.08);
+  --font: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
 *,
@@ -35,9 +36,9 @@ body {
   font-family: var(--font);
   color: var(--text);
   background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(42, 157, 143, 0.18), transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, rgba(78, 168, 222, 0.12), transparent 50%),
-    linear-gradient(180deg, #0d1217 0%, #121820 100%);
+    radial-gradient(900px 420px at 100% -10%, rgba(43, 125, 233, 0.12), transparent 55%),
+    radial-gradient(700px 380px at 0% 0%, rgba(15, 157, 142, 0.1), transparent 50%),
+    linear-gradient(180deg, #ffffff 0%, #f3f8fc 100%);
   background-attachment: fixed;
 }
 
@@ -55,6 +56,11 @@ textarea {
 
 button {
   cursor: pointer;
+}
+
+vite-error-overlay {
+  display: none !important;
+  pointer-events: none !important;
 }
 
 ::selection {

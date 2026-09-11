@@ -41,7 +41,7 @@
         <h2>登录</h2>
         <label>
           用户名
-          <input v-model="username" autocomplete="username" placeholder="admin / 任意操作员" />
+          <input v-model="username" autocomplete="username" placeholder="admin / zhangsan / lisi" />
         </label>
         <label>
           密码
@@ -49,10 +49,13 @@
             v-model="password"
             type="password"
             autocomplete="current-password"
-            placeholder="任意非空密码（开发 mock）"
+            placeholder="admin123 / zhangsan123 / lisi123"
           />
         </label>
         <p v-if="error" class="error">{{ error }}</p>
+        <p class="accounts">
+          管理员 admin / admin123 · 张三 zhangsan / zhangsan123 · 李四 lisi / lisi123
+        </p>
         <button type="submit" :disabled="loading">
           {{ loading ? '登录中…' : '进入平台' }}
         </button>
@@ -136,7 +139,7 @@ async function onSubmit() {
   border: 1px solid var(--border);
   border-radius: 18px;
   overflow: hidden;
-  background: rgba(23, 30, 38, 0.92);
+  background: var(--bg-elevated);
   box-shadow: var(--shadow);
 }
 
@@ -259,6 +262,13 @@ button[type='submit']:disabled {
   margin: 0;
   color: var(--danger);
   font-size: 13px;
+}
+
+.accounts {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 @media (max-width: 800px) {

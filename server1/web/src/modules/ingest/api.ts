@@ -1,9 +1,17 @@
-import type { DataFile } from '@/types'
+import type { DataFile, PageResult } from '@/types'
 import { request } from '@/shared/http'
 
-export async function fetchFiles(projectId?: string): Promise<DataFile[]> {
-  const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''
-  return request(`/files${q}`)
+export async function fetchFiles(query?: {
+  projectId?: string
+  page?: number
+  pageSize?: number
+}): Promise<PageResult<DataFile>> {
+  const params = new URLSearchParams()
+  if (query?.projectId) params.set('projectId', query.projectId)
+  if (query?.page) params.set('page', String(query.page))
+  if (query?.pageSize) params.set('pageSize', String(query.pageSize))
+  const q = params.toString()
+  return request(`/files${q ? `?${q}` : ''}`)
 }
 
 export async function uploadFile(input: {

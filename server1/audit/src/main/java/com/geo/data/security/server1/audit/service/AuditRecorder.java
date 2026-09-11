@@ -3,7 +3,7 @@ package com.geo.data.security.server1.audit.service;
 import com.geo.data.security.server1.audit.model.AuditEventCommand;
 
 /**
- * 业务事件产生与提交。各模块在登录/上传/项目/任务/审批后调用，不直接操作 ES 或链上私钥。
+ * 业务事件产生与提交。各模块在上传/项目/任务/审批后调用，不直接操作 ES 或链上私钥。不记录登录、退出。
  */
 public interface AuditRecorder {
 

@@ -1,7 +1,7 @@
 import type { UserInfo } from '@/types'
 import { clearSession, getToken, request, setSession } from '@/shared/http'
 
-export { getStoredUser, getToken, clearSession } from '@/shared/http'
+export { getStoredUser, getToken, clearSession, setSession } from '@/shared/http'
 
 export async function login(username: string, password: string): Promise<UserInfo> {
   const data = await request<{ token: string; user: UserInfo }>('/auth/login', {
@@ -10,6 +10,10 @@ export async function login(username: string, password: string): Promise<UserInf
   })
   setSession(data.token, data.user)
   return data.user
+}
+
+export async function fetchMe(): Promise<UserInfo> {
+  return request<UserInfo>('/auth/me')
 }
 
 export async function logout() {

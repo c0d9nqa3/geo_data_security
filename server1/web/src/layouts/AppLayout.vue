@@ -39,6 +39,7 @@
           <p v-if="!isDashboard">终端通过本界面访问服务器1业务能力；结果只读接口由服务器2提供。</p>
         </div>
         <div class="top-actions">
+          <NoticeBell />
           <div class="env-pill">测试环境 · Win10</div>
         </div>
       </header>
@@ -50,13 +51,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter, RouterLink, RouterView } from 'vue-router'
-import { getStoredUser, logout } from '@/modules/auth/api'
+import { fetchMe, getStoredUser, getToken, logout, setSession } from '@/modules/auth/api'
+import NoticeBell from '@/shared/NoticeBell.vue'
 
 const route = useRoute()
 const router = useRouter()
-const user = getStoredUser()
+const user = ref(getStoredUser())
 
 const nav = [
   { to: '/dashboard', label: '工作台' },
@@ -73,17 +75,43 @@ const isDashboard = computed(() => route.name === 'dashboard')
 const roleLabel = computed(() => {
   const map: Record<string, string> = {
     admin: '管理员',
-    operator: '操作员',
+    operator: '普通员工',
     auditor: '审计员',
     viewer: '只读',
   }
-  return user ? map[user.role] ?? user.role : ''
+  return user.value ? map[user.value.role] ?? user.value.role : ''
 })
 
 async function onLogout() {
-  await logout()
-  router.push({ name: 'login' })
+  try {
+    await logout()
+  } finally {
+    router.push({ name: 'login' })
+  }
 }
+
+async function refreshUser() {
+  if (!getToken()) return
+  try {
+    const me = await fetchMe()
+    user.value = me
+    const token = getToken()
+    if (token) setSession(token, me)
+  } catch {
+    // 由 http 层处理 401
+  }
+}
+
+let keepaliveTimer = 0
+onMounted(() => {
+  refreshUser()
+  keepaliveTimer = window.setInterval(() => {
+    refreshUser()
+  }, 60_000)
+})
+onUnmounted(() => {
+  if (keepaliveTimer) window.clearInterval(keepaliveTimer)
+})
 </script>
 
 <style scoped>
@@ -99,8 +127,8 @@ async function onLogout() {
   gap: 28px;
   padding: 24px 18px;
   border-right: 1px solid var(--border);
-  background: rgba(15, 20, 25, 0.88);
-  backdrop-filter: blur(10px);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fcff 100%);
+  box-shadow: 8px 0 28px rgba(20, 72, 110, 0.04);
 }
 
 .brand {
@@ -142,7 +170,7 @@ async function onLogout() {
   align-items: center;
   gap: 10px;
   padding: 11px 12px;
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--text-muted);
   transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
@@ -155,7 +183,8 @@ async function onLogout() {
 
 .nav-item.active {
   background: var(--accent-soft);
-  color: var(--text);
+  color: #0b6e64;
+  font-weight: 700;
 }
 
 .nav-dot {
@@ -184,8 +213,9 @@ async function onLogout() {
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--bg-panel);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.88);
 }
 
 .user-chip span {
@@ -251,8 +281,8 @@ async function onLogout() {
   padding: 8px 12px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: var(--bg-panel);
-  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.86);
+  color: #3d6a88;
   font-size: 12px;
 }
 
@@ -267,6 +297,7 @@ async function onLogout() {
   flex-direction: column;
   min-width: 0;
   min-height: 100vh;
+  color: var(--text);
 }
 
 @media (max-width: 900px) {
