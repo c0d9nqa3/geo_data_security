@@ -315,6 +315,27 @@ class Server1ApplicationTest {
     }
 
     @Test
+    void staffCanReadDataVolumeAnalysis() throws Exception {
+        String token = login("zhangsan", "zhangsan123");
+        mockMvc.perform(get("/api/dashboard/volume").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.granularity").value("month"))
+                .andExpect(jsonPath("$.data.countThreshold").value(10000))
+                .andExpect(jsonPath("$.data.bytesThreshold").value(10L * 1024 * 1024 * 1024))
+                .andExpect(jsonPath("$.data.kinds.length()").value(7))
+                .andExpect(jsonPath("$.data.kinds[0].code").value("GeoTIFF"))
+                .andExpect(jsonPath("$.data.kinds[0].points.length()").value(12))
+                .andExpect(jsonPath("$.data.kinds[0].countAlert").value(true))
+                .andExpect(jsonPath("$.data.countAlert").value(true))
+                .andExpect(jsonPath("$.data.bytesAlert").value(true));
+        mockMvc.perform(get("/api/dashboard/volume?granularity=year").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.granularity").value("year"))
+                .andExpect(jsonPath("$.data.kinds.length()").value(7))
+                .andExpect(jsonPath("$.data.kinds[0].points.length()").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)));
+    }
+
+    @Test
     void reviewerShouldReceiveUrgeNotice() throws Exception {
         String admin = login("admin", "admin123");
         mockMvc.perform(post("/api/notices/read-all").header("Authorization", "Bearer " + admin))

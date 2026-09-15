@@ -30,7 +30,7 @@ export interface Project {
   description: string
 }
 
-export type FileKind = 'GeoTIFF' | 'SHP/GeoJSON' | 'DLG' | 'OSGB' | '其他'
+export type FileKind = 'GeoTIFF' | 'DOM' | 'DEM' | 'DLG' | 'SHP/GeoJSON' | 'OSGB' | '点云' | '其他'
 
 export type FileStatus = 'uploaded' | 'checking' | 'transferred' | 'failed'
 

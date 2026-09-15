@@ -11,6 +11,7 @@ import com.geo.data.security.server1.task.controller.dto.TaskDto;
 import com.geo.data.security.server1.task.service.TaskService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
@@ -29,13 +30,16 @@ public class DashboardController {
     private final FileIngestService fileIngestService;
     private final TaskService taskService;
     private final AuditQueryService auditQueryService;
+    private final DashboardVolumeService dashboardVolumeService;
 
     public DashboardController(ProjectService projectService, FileIngestService fileIngestService,
-                               TaskService taskService, AuditQueryService auditQueryService) {
+                               TaskService taskService, AuditQueryService auditQueryService,
+                               DashboardVolumeService dashboardVolumeService) {
         this.projectService = projectService;
         this.fileIngestService = fileIngestService;
         this.taskService = taskService;
         this.auditQueryService = auditQueryService;
+        this.dashboardVolumeService = dashboardVolumeService;
     }
 
     @GetMapping("/overview")
@@ -56,6 +60,13 @@ public class DashboardController {
                 fillTrend(taskService.countCreatedByDay(from), from),
                 fillTrend(auditQueryService.countByDay(from), from)
         ));
+    }
+
+    @GetMapping("/volume")
+    public ApiResponse<DataVolumeOverviewDto> volume(
+            @RequestParam(value = "granularity", required = false) String granularity,
+            @RequestParam(value = "year", required = false) Integer year) {
+        return ApiResponse.ok(RequestContext.requestId(), dashboardVolumeService.build(granularity, year));
     }
 
     private static List<DashboardTrendPoint> fillTrend(Map<String, Long> counts, LocalDate from) {

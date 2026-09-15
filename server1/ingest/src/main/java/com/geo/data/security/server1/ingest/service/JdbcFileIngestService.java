@@ -11,6 +11,8 @@ import com.geo.data.security.server1.common.support.DataScope;
 import com.geo.data.security.server1.common.support.TimeFormats;
 import com.geo.data.security.server1.common.web.PageDto;
 import com.geo.data.security.server1.ingest.controller.dto.DataFileDto;
+import com.geo.data.security.server1.ingest.controller.dto.FileVolumeRow;
+import com.geo.data.security.server1.ingest.support.GeoDataKinds;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,7 +35,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Locale;
 
 @Service
 @ConditionalOnProperty(name = "gateway.business-store", havingValue = "jdbc", matchIfMissing = true)
@@ -91,6 +92,27 @@ public class JdbcFileIngestService implements FileIngestService {
         RequestContext.requirePrincipal();
         Long total = jdbc.queryForObject("SELECT COUNT(*) FROM biz_file", Long.class);
         return total == null ? 0 : total;
+    }
+
+    @Override
+    public List<FileVolumeRow> listVolumeRows() {
+        RequestContext.requirePrincipal();
+        return jdbc.query("""
+                SELECT data_kind,
+                       YEAR(COALESCE(created_at, updated_at, NOW())) AS y,
+                       MONTH(COALESCE(created_at, updated_at, NOW())) AS m,
+                       COUNT(*) AS cnt,
+                       COALESCE(SUM(size_bytes), 0) AS bytes
+                FROM biz_file
+                GROUP BY data_kind, YEAR(COALESCE(created_at, updated_at, NOW())),
+                         MONTH(COALESCE(created_at, updated_at, NOW()))
+                """, (rs, i) -> new FileVolumeRow(
+                rs.getString("data_kind"),
+                rs.getInt("y"),
+                rs.getInt("m"),
+                rs.getLong("cnt"),
+                rs.getLong("bytes")
+        ));
     }
 
     @Override
@@ -185,39 +207,15 @@ public class JdbcFileIngestService implements FileIngestService {
     }
 
     static String toDbKind(String uiKind) {
-        return switch (uiKind) {
-            case "GeoTIFF" -> "GeoTIFF";
-            case "SHP/GeoJSON" -> "SHP_GEOJSON";
-            case "DLG" -> "DLG";
-            case "OSGB" -> "OSGB";
-            default -> "OTHER";
-        };
+        return GeoDataKinds.toDbCode(uiKind);
     }
 
     static String toUiKind(String dbKind) {
-        if (dbKind == null) {
-            return "其他";
-        }
-        return switch (dbKind.toUpperCase(Locale.ROOT)) {
-            case "GEOTIFF" -> "GeoTIFF";
-            case "SHP_GEOJSON" -> "SHP/GeoJSON";
-            case "DLG" -> "DLG";
-            case "OSGB" -> "OSGB";
-            default -> "其他";
-        };
+        return GeoDataKinds.toUiLabel(dbKind);
     }
 
     static String inferKind(String fileName) {
-        String lower = fileName.toLowerCase(Locale.ROOT);
-        int dot = lower.lastIndexOf('.');
-        String ext = dot >= 0 ? lower.substring(dot + 1) : "";
-        return switch (ext) {
-            case "tif", "tiff" -> "GeoTIFF";
-            case "shp", "geojson", "json" -> "SHP/GeoJSON";
-            case "dlg" -> "DLG";
-            case "osgb" -> "OSGB";
-            default -> "其他";
-        };
+        return GeoDataKinds.inferUiKind(fileName);
     }
 
     static String safeFileName(String raw) {

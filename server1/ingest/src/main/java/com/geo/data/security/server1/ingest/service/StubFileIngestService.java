@@ -11,11 +11,16 @@ import com.geo.data.security.server1.common.support.DataScope;
 import com.geo.data.security.server1.common.support.TimeFormats;
 import com.geo.data.security.server1.common.web.PageDto;
 import com.geo.data.security.server1.ingest.controller.dto.DataFileDto;
+import com.geo.data.security.server1.ingest.controller.dto.FileVolumeRow;
+import com.geo.data.security.server1.ingest.support.GeoDataKinds;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,6 +35,7 @@ public class StubFileIngestService implements FileIngestService {
                     1840, "transferred", "sha256:8f3a…c91", "张工", "2026-09-01 15:10")
     ));
     private final Map<String, String> uploaders = new ConcurrentHashMap<>(Map.of("file_2001", "u_admin"));
+    private final List<FileVolumeRow> volumeRows = demoVolumeRows();
     private final AuditRecorder auditRecorder;
     private final CirculationIntake circulationIntake;
 
@@ -52,6 +58,12 @@ public class StubFileIngestService implements FileIngestService {
     public long countAll() {
         RequestContext.requirePrincipal();
         return files.size();
+    }
+
+    @Override
+    public List<FileVolumeRow> listVolumeRows() {
+        RequestContext.requirePrincipal();
+        return List.copyOf(volumeRows);
     }
 
     @Override
@@ -85,5 +97,38 @@ public class StubFileIngestService implements FileIngestService {
         auditRecorder.record("upload", projectId, created.id(), null, "上传 " + created.name(), "success");
         circulationIntake.openTicket("file", projectId, created.id(), null, "上传文件审核：" + created.name());
         return created;
+    }
+
+    private static List<FileVolumeRow> demoVolumeRows() {
+        List<FileVolumeRow> rows = new ArrayList<>();
+        YearMonth cursor = YearMonth.now(ZoneId.of("Asia/Shanghai"));
+        for (int i = 17; i >= 0; i--) {
+            YearMonth ym = cursor.minusMonths(i);
+            for (GeoDataKinds.Def def : GeoDataKinds.ALL) {
+                long count = switch (def.dbCode()) {
+                    case "GeoTIFF" -> 620;
+                    case "DOM" -> 48;
+                    case "DEM" -> 36;
+                    case "DLG" -> 80;
+                    case "SHP_GEOJSON" -> 95;
+                    case "OSGB" -> 28;
+                    case "POINT_CLOUD" -> 54;
+                    default -> 10;
+                };
+                count += ym.getMonthValue() * 2L;
+                long bytes = switch (def.dbCode()) {
+                    case "GeoTIFF" -> 420L * 1024 * 1024;
+                    case "DOM" -> 180L * 1024 * 1024;
+                    case "DEM" -> 90L * 1024 * 1024;
+                    case "DLG" -> 25L * 1024 * 1024;
+                    case "SHP_GEOJSON" -> 40L * 1024 * 1024;
+                    case "OSGB" -> 780L * 1024 * 1024;
+                    case "POINT_CLOUD" -> 260L * 1024 * 1024;
+                    default -> 8L * 1024 * 1024;
+                };
+                rows.add(new FileVolumeRow(def.dbCode(), ym.getYear(), ym.getMonthValue(), count, bytes));
+            }
+        }
+        return List.copyOf(rows);
     }
 }

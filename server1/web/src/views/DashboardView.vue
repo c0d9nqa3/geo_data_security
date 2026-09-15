@@ -31,6 +31,8 @@
       </article>
     </section>
 
+    <DataVolumePanel />
+
     <section class="charts">
       <article class="glass">
         <TrendChart title="提交流程" color="#0f9d8e" unit="条流程" :points="taskTrend" />
@@ -104,6 +106,7 @@ import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { fetchDashboardOverview, type DashboardTrendPoint } from '@/modules/dashboard/api'
 import TrendChart from '@/shared/TrendChart.vue'
+import DataVolumePanel from '@/shared/DataVolumePanel.vue'
 import type { AuditEvent, TaskItem } from '@/types'
 
 const cards = ref([

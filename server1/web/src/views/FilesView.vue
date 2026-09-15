@@ -79,11 +79,7 @@
         <label>
           数据类型
           <select v-model="form.kind">
-            <option>GeoTIFF</option>
-            <option>SHP/GeoJSON</option>
-            <option>DLG</option>
-            <option>OSGB</option>
-            <option>其他</option>
+            <option v-for="k in fileKinds" :key="k.value" :value="k.value">{{ k.title }} · {{ k.label }}</option>
           </select>
         </label>
         <label>
@@ -134,6 +130,16 @@ const form = reactive({
   name: '',
 })
 
+const fileKinds: { value: FileKind; label: string; title: string }[] = [
+  { value: 'GeoTIFF', label: 'GeoTIFF', title: '遥感影像' },
+  { value: 'DOM', label: 'DOM', title: '数字正射影像' },
+  { value: 'DEM', label: 'DEM', title: '数字高程模型' },
+  { value: 'DLG', label: 'DLG', title: '数字线划图' },
+  { value: 'SHP/GeoJSON', label: 'SHP/GeoJSON', title: '矢量专题' },
+  { value: 'OSGB', label: 'OSGB', title: '倾斜摄影三维' },
+  { value: '点云', label: '点云', title: '激光点云' },
+]
+
 function statusText(s: DataFile['status']) {
   return (
     {
@@ -152,10 +158,13 @@ function startProcess(fileId: string) {
 function inferKind(name: string): FileKind {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   if (ext === 'tif' || ext === 'tiff') return 'GeoTIFF'
-  if (ext === 'shp' || ext === 'geojson' || ext === 'json') return 'SHP/GeoJSON'
+  if (ext === 'img' || ext === 'sid') return 'DOM'
+  if (ext === 'dem' || ext === 'asc' || ext === 'bil' || ext === 'hgt') return 'DEM'
   if (ext === 'dlg') return 'DLG'
-  if (ext === 'osgb') return 'OSGB'
-  return '其他'
+  if (ext === 'shp' || ext === 'geojson' || ext === 'json' || ext === 'gpkg') return 'SHP/GeoJSON'
+  if (ext === 'osgb' || ext === 'obj' || ext === 'gltf' || ext === 'glb') return 'OSGB'
+  if (ext === 'las' || ext === 'laz' || ext === 'xyz' || ext === 'e57') return '点云'
+  return 'GeoTIFF'
 }
 
 function formatSize(bytes: number): string {
