@@ -79,7 +79,9 @@
         <label>
           数据类型
           <select v-model="form.kind">
-            <option v-for="k in fileKinds" :key="k.value" :value="k.value">{{ k.title }} · {{ k.label }}</option>
+            <option v-for="k in fileKinds" :key="k.value" :value="k.value">
+              {{ k.label ? `${k.title}（${k.label}）` : k.title }}
+            </option>
           </select>
         </label>
         <label>
@@ -126,18 +128,18 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const pickedFile = ref<File | null>(null)
 const form = reactive({
   projectId: '',
-  kind: 'GeoTIFF' as FileKind,
+  kind: 'DLG' as FileKind,
   name: '',
 })
 
 const fileKinds: { value: FileKind; label: string; title: string }[] = [
-  { value: 'GeoTIFF', label: 'GeoTIFF', title: '遥感影像' },
+  { value: 'DLG', label: 'DLG', title: '数字线划地图' },
   { value: 'DOM', label: 'DOM', title: '数字正射影像' },
   { value: 'DEM', label: 'DEM', title: '数字高程模型' },
-  { value: 'DLG', label: 'DLG', title: '数字线划图' },
-  { value: 'SHP/GeoJSON', label: 'SHP/GeoJSON', title: '矢量专题' },
-  { value: 'OSGB', label: 'OSGB', title: '倾斜摄影三维' },
-  { value: '点云', label: '点云', title: '激光点云' },
+  { value: 'DRG', label: 'DRG', title: '数字栅格地图' },
+  { value: '基础地理实体数据', label: '', title: '基础地理实体数据' },
+  { value: '倾斜摄影Mesh三维模型', label: '', title: '倾斜摄影Mesh三维模型' },
+  { value: '激光点云数据', label: '', title: '激光点云数据' },
 ]
 
 function statusText(s: DataFile['status']) {
@@ -157,14 +159,14 @@ function startProcess(fileId: string) {
 
 function inferKind(name: string): FileKind {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
-  if (ext === 'tif' || ext === 'tiff') return 'GeoTIFF'
-  if (ext === 'img' || ext === 'sid') return 'DOM'
+  if (ext === 'dlg' || ext === 'dxf') return 'DLG'
+  if (ext === 'tif' || ext === 'tiff' || ext === 'img' || ext === 'sid' || ext === 'jp2') return 'DOM'
   if (ext === 'dem' || ext === 'asc' || ext === 'bil' || ext === 'hgt') return 'DEM'
-  if (ext === 'dlg') return 'DLG'
-  if (ext === 'shp' || ext === 'geojson' || ext === 'json' || ext === 'gpkg') return 'SHP/GeoJSON'
-  if (ext === 'osgb' || ext === 'obj' || ext === 'gltf' || ext === 'glb') return 'OSGB'
-  if (ext === 'las' || ext === 'laz' || ext === 'xyz' || ext === 'e57') return '点云'
-  return 'GeoTIFF'
+  if (ext === 'drg') return 'DRG'
+  if (ext === 'shp' || ext === 'geojson' || ext === 'json' || ext === 'gpkg' || ext === 'gdb') return '基础地理实体数据'
+  if (ext === 'osgb' || ext === 'obj' || ext === 'gltf' || ext === 'glb' || ext === '3mx') return '倾斜摄影Mesh三维模型'
+  if (ext === 'las' || ext === 'laz' || ext === 'xyz' || ext === 'e57' || ext === 'pts') return '激光点云数据'
+  return 'DLG'
 }
 
 function formatSize(bytes: number): string {

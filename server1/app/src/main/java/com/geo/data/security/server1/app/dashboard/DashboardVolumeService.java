@@ -77,7 +77,7 @@ public class DashboardVolumeService {
         for (FileVolumeRow row : rows) {
             allCount += row.count();
             allBytes += row.bytes();
-            Integer ki = kindIndex.get(row.dataKind() == null ? "" : row.dataKind().toUpperCase(Locale.ROOT));
+            Integer ki = kindIndex.get(GeoDataKinds.normalizeDbCode(row.dataKind()).toUpperCase(Locale.ROOT));
             if (ki == null) {
                 continue;
             }

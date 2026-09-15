@@ -5,7 +5,7 @@
       <div>
         <p class="kicker">CAPACITY RADAR · 7-CLASS VOLUME</p>
         <h3>数据体量分析</h3>
-        <p class="sub">按年度 / 月份统计七类上传数据；单类或总量达到 1 万条、或存储达到 10 GB 时深红色预警。七类名称待客户确认后可替换。</p>
+        <p class="sub">按年度 / 月份统计七类上传数据；单类或总量达到 1 万条、或存储达到 10 GB 时深红色预警。</p>
       </div>
       <div class="controls">
         <div class="pills">
@@ -60,7 +60,7 @@
           <span class="dot" :style="{ background: kind.color }" />
           <div>
             <strong>{{ kind.title }}</strong>
-            <small>{{ kind.label }}</small>
+            <small v-if="kind.label && kind.label !== kind.title">{{ kind.label }}</small>
           </div>
           <em v-if="kind.countAlert || kind.bytesAlert">预警</em>
         </div>
@@ -416,7 +416,8 @@ select {
 
 .kind-card strong {
   display: block;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.35;
   color: #f2fdff;
 }
 

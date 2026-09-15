@@ -31,7 +31,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class StubFileIngestService implements FileIngestService {
 
     private final List<DataFileDto> files = new CopyOnWriteArrayList<>(List.of(
-            new DataFileDto("file_2001", "prj_1001", "城区正射影像库", "tile_A12.tif", "GeoTIFF",
+            new DataFileDto("file_2001", "prj_1001", "城区正射影像库", "tile_A12.tif", "DOM",
                     1840, "transferred", "sha256:8f3a…c91", "张工", "2026-09-01 15:10")
     ));
     private final Map<String, String> uploaders = new ConcurrentHashMap<>(Map.of("file_2001", "u_admin"));
@@ -106,23 +106,23 @@ public class StubFileIngestService implements FileIngestService {
             YearMonth ym = cursor.minusMonths(i);
             for (GeoDataKinds.Def def : GeoDataKinds.ALL) {
                 long count = switch (def.dbCode()) {
-                    case "GeoTIFF" -> 620;
+                    case "DLG" -> 620;
                     case "DOM" -> 48;
                     case "DEM" -> 36;
-                    case "DLG" -> 80;
-                    case "SHP_GEOJSON" -> 95;
-                    case "OSGB" -> 28;
+                    case "DRG" -> 40;
+                    case "GEO_ENTITY" -> 95;
+                    case "MESH" -> 28;
                     case "POINT_CLOUD" -> 54;
                     default -> 10;
                 };
                 count += ym.getMonthValue() * 2L;
                 long bytes = switch (def.dbCode()) {
-                    case "GeoTIFF" -> 420L * 1024 * 1024;
-                    case "DOM" -> 180L * 1024 * 1024;
-                    case "DEM" -> 90L * 1024 * 1024;
                     case "DLG" -> 25L * 1024 * 1024;
-                    case "SHP_GEOJSON" -> 40L * 1024 * 1024;
-                    case "OSGB" -> 780L * 1024 * 1024;
+                    case "DOM" -> 420L * 1024 * 1024;
+                    case "DEM" -> 90L * 1024 * 1024;
+                    case "DRG" -> 180L * 1024 * 1024;
+                    case "GEO_ENTITY" -> 40L * 1024 * 1024;
+                    case "MESH" -> 780L * 1024 * 1024;
                     case "POINT_CLOUD" -> 260L * 1024 * 1024;
                     default -> 8L * 1024 * 1024;
                 };
