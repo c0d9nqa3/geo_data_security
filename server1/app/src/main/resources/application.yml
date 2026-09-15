@@ -9,10 +9,12 @@ spring:
   application:
     name: server1
   datasource:
-    url: jdbc:mysql://${SERVER1_DB_HOST:127.0.0.1}:${SERVER1_DB_PORT:3306}/geo_server1?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://${SERVER1_DB_HOST:127.0.0.1}:${SERVER1_DB_PORT:3306}/geo_server1?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_general_ci&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
     username: ${SERVER1_DB_USER:root}
     password: ${SERVER1_DB_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      connection-init-sql: SET NAMES utf8mb4 COLLATE utf8mb4_general_ci
   servlet:
     multipart:
       max-file-size: 50GB
@@ -34,7 +36,7 @@ auth:
   token-store: memory
   user-store: jdbc
   jwt-secret: ${SERVER1_JWT_SECRET:LOCAL_DEV_ONLY_CHANGE_ME_32CHARS_MIN}
-  token-ttl-seconds: 28800
+  token-ttl-seconds: ${SERVER1_TOKEN_TTL_SECONDS:604800}
   require-session-cache: true
 
 gateway:
@@ -42,7 +44,7 @@ gateway:
   business-store: jdbc
   security:
     jwt-secret: ${SERVER1_JWT_SECRET:LOCAL_DEV_ONLY_CHANGE_ME_32CHARS_MIN}
-    token-ttl-seconds: 28800
+    token-ttl-seconds: ${SERVER1_TOKEN_TTL_SECONDS:604800}
     tls-enabled: false
     public-paths:
       - /api/health
@@ -51,9 +53,9 @@ gateway:
       - /actuator/health
   rate-limit:
     enabled: true
-    requests-per-minute-per-ip: 120
-    requests-per-minute-per-user: 180
-    burst: 40
+    requests-per-minute-per-ip: 600
+    requests-per-minute-per-user: 900
+    burst: 200
   cors:
     allowed-origins:
       - http://localhost:5173

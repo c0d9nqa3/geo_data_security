@@ -10,12 +10,18 @@ export default defineConfig({
     },
   },
   server: {
+    host: '0.0.0.0',
     port: 5173,
+    strictPort: true,
+    hmr: {
+      overlay: false,
+    },
     proxy: {
-      // 开发时转发到 server1 后端（app 进程）
       '/api': {
         target: 'http://127.0.0.1:8081',
         changeOrigin: true,
+        timeout: 0,
+        proxyTimeout: 0,
       },
     },
   },
