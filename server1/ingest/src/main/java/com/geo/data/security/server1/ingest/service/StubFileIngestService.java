@@ -2,6 +2,7 @@ package com.geo.data.security.server1.ingest.service;
 
 import com.geo.data.security.server1.audit.service.AuditRecorder;
 import com.geo.data.security.server1.circulation.service.CirculationIntake;
+import com.geo.data.security.server1.circulation.service.Server2TraceSnapshot;
 import com.geo.data.security.server1.common.context.AccessPrincipal;
 import com.geo.data.security.server1.common.context.RequestContext;
 import com.geo.data.security.server1.common.error.ApiException;
@@ -11,6 +12,7 @@ import com.geo.data.security.server1.common.support.DataScope;
 import com.geo.data.security.server1.common.support.TimeFormats;
 import com.geo.data.security.server1.common.web.PageDto;
 import com.geo.data.security.server1.ingest.controller.dto.DataFileDto;
+import com.geo.data.security.server1.ingest.controller.dto.FileProvenanceDto;
 import com.geo.data.security.server1.ingest.controller.dto.FileVolumeRow;
 import com.geo.data.security.server1.ingest.support.GeoDataKinds;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -97,6 +99,39 @@ public class StubFileIngestService implements FileIngestService {
         auditRecorder.record("upload", projectId, created.id(), null, "上传 " + created.name(), "success");
         circulationIntake.openTicket("file", projectId, created.id(), null, "上传文件审核：" + created.name());
         return created;
+    }
+
+    @Override
+    public FileProvenanceDto getProvenance(String fileIdRaw) {
+        AccessPrincipal principal = RequestContext.requirePrincipal();
+        String fileId = Checks.requireText(fileIdRaw, "文件不存在");
+        DataFileDto file = files.stream().filter(item -> fileId.equals(item.id())).findFirst()
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "文件不存在"));
+        DataScope.requireVisible(principal, uploaders.get(file.id()));
+        boolean demo = "file_2001".equals(file.id()) || "transferred".equals(file.status());
+        FileProvenanceAssembler.Circ circ = new FileProvenanceAssembler.Circ(
+                demo ? "approved" : "pending",
+                demo ? "dispatched" : "none",
+                file.uploadedBy(),
+                demo ? "管理员" : "",
+                demo ? "演示分发" : "上传文件审核：" + file.name(),
+                file.uploadedAt(),
+                file.uploadedAt(),
+                demo ? "res_demo" : ""
+        );
+        Server2TraceSnapshot live = demo
+                ? new Server2TraceSnapshot(
+                true, "", "task_demo", "res_demo", "COMPLETED", "APPROVED",
+                "/demo/" + file.name(), file.hash(), "sha256:result", "0xdemo",
+                true, "sandbox_osgb_pixel_extract", 89, 89, true,
+                "0xb2b3c3de", "141189", file.uploadedAt())
+                : Server2TraceSnapshot.unavailable("演示环境未连接服务器2");
+        auditRecorder.record("query_trace", file.projectId(), file.id(), demo ? "task_demo" : null,
+                "查看文件溯源 " + file.name(), "success");
+        return FileProvenanceAssembler.assemble(
+                file.id(), file.name(), file.projectId(), file.projectName(), file.status(),
+                file.uploadedBy(), file.uploadedAt(), file.hash(), circ, live,
+                demo ? "task_demo" : "", demo ? "res_demo" : "", demo ? "/demo/" + file.name() : "");
     }
 
     private static List<FileVolumeRow> demoVolumeRows() {

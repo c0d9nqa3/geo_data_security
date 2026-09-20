@@ -14,6 +14,19 @@ export async function fetchProjects(query?: {
   return request(`/projects${q ? `?${q}` : ''}`)
 }
 
+/** 上传等下拉框：从后台把当前用户可见项目全部拉齐。 */
+export async function fetchAllProjects(): Promise<Project[]> {
+  const pageSize = 100
+  const first = await fetchProjects({ page: 1, pageSize })
+  const items = [...first.items]
+  const pages = Math.max(1, first.totalPages || 1)
+  for (let page = 2; page <= pages; page++) {
+    const next = await fetchProjects({ page, pageSize })
+    items.push(...next.items)
+  }
+  return items
+}
+
 export async function createProject(input: {
   name: string
   code: string

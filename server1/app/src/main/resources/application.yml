@@ -4,6 +4,13 @@ server:
     encoding:
       charset: UTF-8
       force: true
+  tomcat:
+    connection-timeout: 3600000
+    max-swallow-size: -1
+    max-http-form-post-size: -1
+    max-connections: 200
+    threads:
+      max: 80
 
 spring:
   application:
@@ -19,6 +26,8 @@ spring:
     multipart:
       max-file-size: 50GB
       max-request-size: 50GB
+      file-size-threshold: 0
+      location: ${INGEST_RECEIVE_DIR:D:/geo_data_security/receive}
   jackson:
     default-property-inclusion: non_null
 
@@ -78,7 +87,20 @@ gateway:
       - /fisco
 
 ingest:
-  receive-dir: ${INGEST_RECEIVE_DIR:./data/receive}
+  receive-dir: ${INGEST_RECEIVE_DIR:D:/geo_data_security/receive}
+
+server2:
+  dispatch:
+    enabled: true
+    base-url: ${SERVER2_BASE_URL:http://10.1.1.121:9081}
+    token: ${GDS_SERVER2_TOKEN:}
+    admin-token: ${GDS_SERVER2_ADMIN_TOKEN:}
+    chunk-size-bytes: 67108864
+    chunk-concurrency: 4
+    connect-timeout-ms: 15000
+    request-timeout-ms: 600000
+    poll-interval-ms: 2000
+    poll-timeout-ms: 21600000
 
 logging:
   level:

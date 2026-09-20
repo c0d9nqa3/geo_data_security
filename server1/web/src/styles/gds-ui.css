@@ -1,0 +1,32 @@
+/* 安全服务：上传文件夹列表 */
+.gds-simple{display:flex;flex-direction:column;gap:1rem;max-width:1180px}
+.gds-hero{border:1px solid var(--border);border-radius:16px;padding:1.1rem 1.25rem;background:radial-gradient(420px 140px at 92% 0%,var(--accent-soft),transparent 60%),linear-gradient(135deg,var(--bg-elevated),color-mix(in srgb,var(--bg) 70%,#fff));box-shadow:var(--shadow)}
+.gds-hero h2{margin:.2rem 0 0;font-size:1.35rem}
+.gds-hero p{margin:.4rem 0 0;color:var(--text-muted);line-height:1.55;font-size:.92rem;max-width:780px}
+.gds-eyebrow{margin:0;color:var(--accent);font-size:11px;font-weight:700;letter-spacing:.14em}
+.gds-panel{border:1px solid var(--border);border-radius:14px;background:var(--bg-card);box-shadow:var(--shadow);padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.85rem}
+.gds-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.7rem;align-items:end}
+.gds-filters label{display:flex;flex-direction:column;gap:.28rem;font-size:.84rem}
+.gds-filters input,.gds-filters select{padding:.52rem .65rem;border:1px solid var(--border);border-radius:10px;background:var(--bg-elevated);color:var(--text);outline:none}
+.gds-filters input:focus,.gds-filters select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.gds-actions{display:flex;flex-wrap:wrap;gap:.45rem}
+.gds-actions button,.gds-ops button{padding:.42rem .72rem;border-radius:8px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.82rem;font-weight:600;cursor:pointer}
+.gds-actions button.primary,.gds-ops button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.gds-actions button:disabled,.gds-ops button:disabled{opacity:.55;cursor:not-allowed}
+.gds-table-wrap{overflow:auto;border:1px solid var(--border);border-radius:12px}
+.gds-table{width:100%;border-collapse:collapse;font-size:.88rem}
+.gds-table th,.gds-table td{padding:.62rem .7rem;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
+.gds-table th{background:color-mix(in srgb,var(--bg) 65%,#fff);color:var(--text-muted);font-weight:700;white-space:nowrap}
+.gds-table tr:hover td{background:var(--bg-hover)}
+.gds-table .name{font-weight:600}
+.gds-table code{font-size:.75rem;color:var(--text-muted)}
+.gds-tag{display:inline-flex;padding:.12rem .48rem;border-radius:999px;font-size:.74rem;font-weight:700;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.gds-tag.warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.gds-tag.danger{background:color-mix(in srgb,var(--danger) 16%,transparent);color:var(--danger)}
+.gds-tag.muted{background:var(--bg-hover);color:var(--text-muted)}
+.gds-empty{padding:1.8rem;text-align:center;color:var(--text-muted)}
+.gds-msg{margin:0;color:var(--text-muted);font-size:.9rem}
+.gds-msg.ok{color:var(--ok);font-weight:600}
+.gds-err{margin:0;color:var(--danger);font-weight:600}
+.gds-hint{margin:0;color:var(--text-muted);font-size:.86rem;line-height:1.5}
+.gds-ops{display:flex;flex-wrap:wrap;gap:.35rem}

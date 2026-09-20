@@ -4,9 +4,11 @@ import com.geo.data.security.server1.common.context.RequestContext;
 import com.geo.data.security.server1.common.error.ApiResponse;
 import com.geo.data.security.server1.common.web.PageDto;
 import com.geo.data.security.server1.ingest.controller.dto.DataFileDto;
+import com.geo.data.security.server1.ingest.controller.dto.FileProvenanceDto;
 import com.geo.data.security.server1.ingest.service.FileIngestService;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -30,6 +32,11 @@ public class FileIngestController {
             @RequestParam(value = "pageSize", required = false) Integer pageSize) {
         return ApiResponse.ok(RequestContext.requestId(),
                 fileIngestService.listFiles(projectId, page, pageSize));
+    }
+
+    @GetMapping("/{id}/provenance")
+    public ApiResponse<FileProvenanceDto> provenance(@PathVariable("id") String id) {
+        return ApiResponse.ok(RequestContext.requestId(), fileIngestService.getProvenance(id));
     }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

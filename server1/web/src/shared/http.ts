@@ -41,7 +41,7 @@ function redirectToLogin() {
   window.location.replace('/login')
 }
 
-export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const headers = new Headers(init?.headers)
   const isUpload = init?.body instanceof FormData
   if (!isUpload) {
@@ -50,7 +50,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
-  const timeoutMs = isUpload ? 0 : DEFAULT_TIMEOUT_MS
+  const timeoutMs = init?.timeoutMs ?? (isUpload ? 0 : DEFAULT_TIMEOUT_MS)
+  const { timeoutMs: _ignored, ...fetchInit } = init ?? {}
   const controller = new AbortController()
   const timeoutId =
     timeoutMs > 0 ? window.setTimeout(() => controller.abort(), timeoutMs) : undefined
@@ -60,7 +61,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   let res: Response
   try {
-    res = await fetch(`/api${path}`, { ...init, headers, signal: controller.signal })
+    res = await fetch(`/api${path}`, { ...fetchInit, headers, signal: controller.signal })
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new Error('请求超时，请稍后重试')

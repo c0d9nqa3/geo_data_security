@@ -46,7 +46,7 @@
             <td>{{ e.actor }}</td>
             <td>{{ actionText(e.action) }}</td>
             <td>{{ e.projectId || '—' }}</td>
-            <td>{{ e.detail }}</td>
+            <td class="detail-cell">{{ formatAuditDetail(e) }}</td>
             <td><span class="tag" :data-r="e.result">{{ resultText(e.result) }}</span></td>
           </tr>
         </tbody>
@@ -60,6 +60,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { fetchAudits } from '@/modules/audit/api'
+import { formatAuditDetail } from '@/shared/auditDetailDisplay'
 import PagerBar from '@/shared/PagerBar.vue'
 import type { AuditAction, AuditEvent } from '@/types'
 
@@ -194,6 +195,13 @@ th {
 
 tr:last-child td {
   border-bottom: none;
+}
+
+.detail-cell {
+  max-width: 280px;
+  line-height: 1.45;
+  color: var(--text);
+  word-break: break-word;
 }
 
 .tag {

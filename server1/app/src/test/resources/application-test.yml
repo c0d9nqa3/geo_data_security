@@ -28,6 +28,10 @@ gateway:
     blocked-path-patterns:
       - /server2
 
+server2:
+  dispatch:
+    enabled: false
+
 spring:
   autoconfigure:
     exclude:

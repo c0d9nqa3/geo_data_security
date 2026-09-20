@@ -8,62 +8,30 @@
   --text: #16324a;
   --text-muted: #5f7e93;
   --accent: #0f9d8e;
-  --accent-hover: #12b3a2;
-  --accent-soft: rgba(15, 157, 142, 0.12);
+  --accent-hover: color-mix(in srgb, var(--accent) 82%, #ffffff);
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --warn: #d97706;
   --danger: #e76f51;
-  --ok: #0f9d8e;
+  --ok: var(--accent);
   --info: #2b7de9;
   --radius: 12px;
   --shadow: 0 18px 40px rgba(20, 72, 110, 0.08);
   --font: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#app {
-  margin: 0;
-  min-height: 100%;
-}
-
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #app { margin: 0; min-height: 100%; }
 body {
   font-family: var(--font);
   color: var(--text);
   background:
-    radial-gradient(900px 420px at 100% -10%, rgba(43, 125, 233, 0.12), transparent 55%),
-    radial-gradient(700px 380px at 0% 0%, rgba(15, 157, 142, 0.1), transparent 50%),
-    linear-gradient(180deg, #ffffff 0%, #f3f8fc 100%);
+    radial-gradient(900px 420px at 100% -10%, color-mix(in srgb, var(--info) 12%, transparent), transparent 55%),
+    radial-gradient(700px 380px at 0% 0%, var(--accent-soft), transparent 50%),
+    linear-gradient(180deg, #ffffff 0%, var(--bg) 100%);
   background-attachment: fixed;
 }
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-button,
-input,
-select,
-textarea {
-  font: inherit;
-}
-
-button {
-  cursor: pointer;
-}
-
-vite-error-overlay {
-  display: none !important;
-  pointer-events: none !important;
-}
-
-::selection {
-  background: var(--accent-soft);
-  color: var(--text);
-}
+a { color: inherit; text-decoration: none; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+vite-error-overlay { display: none !important; pointer-events: none !important; }
+::selection { background: var(--accent-soft); color: var(--text); }

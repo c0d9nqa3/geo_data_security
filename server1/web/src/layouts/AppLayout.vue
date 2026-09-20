@@ -66,6 +66,7 @@ const nav = [
   { to: '/files', label: '文件管理' },
   { to: '/projects', label: '项目管理' },
   { to: '/tasks', label: '任务管理' },
+  { to: '/gds', label: '安全服务' },
   { to: '/audit', label: '审计追溯' },
 ]
 
@@ -183,7 +184,7 @@ onUnmounted(() => {
 
 .nav-item.active {
   background: var(--accent-soft);
-  color: #0b6e64;
+  color: var(--accent);
   font-weight: 700;
 }
 

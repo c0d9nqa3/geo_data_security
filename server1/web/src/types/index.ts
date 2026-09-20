@@ -55,6 +55,46 @@ export interface DataFile {
   uploadedAt: string
 }
 
+export interface FileProvenanceNode {
+  key: string
+  label: string
+  state: string
+  actor?: string
+  time?: string
+  remark?: string
+}
+
+export interface FileProvenanceEvidence {
+  taskId?: string
+  resultId?: string
+  sourcePath?: string
+  sourceHash?: string
+  outputHash?: string
+  chainTx?: string
+  chainBlock?: string
+  onChain?: boolean
+  verified?: boolean
+  method?: string
+  filesProcessed?: number
+  matched?: number
+  watermark?: string
+  server2Status?: string
+}
+
+export interface FileProvenance {
+  fileId: string
+  fileName: string
+  projectId: string
+  projectName: string
+  fileStatus: string
+  currentKey: string
+  currentLabel: string
+  liveFromServer2: boolean
+  liveHint: string
+  nodes: FileProvenanceNode[]
+  evidence: FileProvenanceEvidence
+}
+
 export type TaskStatus =
   | 'pending'
   | 'distributing'

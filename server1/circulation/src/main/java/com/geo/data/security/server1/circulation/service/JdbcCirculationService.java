@@ -17,6 +17,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -44,10 +47,13 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
 
     private final JdbcTemplate jdbc;
     private final AuditRecorder auditRecorder;
+    private final Server2DispatchClient server2DispatchClient;
 
-    public JdbcCirculationService(JdbcTemplate jdbcTemplate, AuditRecorder auditRecorder) {
+    public JdbcCirculationService(JdbcTemplate jdbcTemplate, AuditRecorder auditRecorder,
+                                  Server2DispatchClient server2DispatchClient) {
         this.jdbc = jdbcTemplate;
         this.auditRecorder = auditRecorder;
+        this.server2DispatchClient = server2DispatchClient;
     }
 
     @Override
@@ -155,7 +161,6 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
     }
 
     @Override
-    @Transactional
     public CirculationDto distribute(String circulationId) {
         AccessPrincipal principal = RequestContext.requirePrincipal();
         CirculationDto current = loadById(circulationId);
@@ -172,14 +177,45 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
         LocalDateTime now = LocalDateTime.now();
         Timestamp ts = Timestamp.valueOf(now);
         String type = current.applyType();
+        String jobRef = "s2job_" + circulationId;
+        String commentExtra = "";
+        Server2DispatchResult dispatched = null;
         try {
+            if ("file".equals(type) || (current.fileId() != null && !current.fileId().isBlank())) {
+                dispatched = dispatchFile(current, principal);
+                if (dispatched != null && dispatched.taskId() != null && !dispatched.taskId().isBlank()) {
+                    jobRef = dispatched.taskId();
+                    commentExtra = "服务器2路径=" + dispatched.sourcePath()
+                            + " task=" + dispatched.taskId()
+                            + " result=" + dispatched.resultId();
+                }
+            }
             if ("project".equals(type) && current.projectId() != null) {
                 jdbc.update("UPDATE biz_project SET status = 'active', updated_at = ? WHERE project_id = ?",
                         ts, current.projectId());
             }
-            if ("file".equals(type) && current.fileId() != null) {
-                jdbc.update("UPDATE biz_file SET status = 'transferred', updated_at = ? WHERE file_id = ?",
-                        ts, current.fileId());
+            if (current.fileId() != null && !current.fileId().isBlank()) {
+                String taskId = dispatchedTaskId(commentExtra, jobRef);
+                String resultId = dispatchedResultId(commentExtra);
+                String sourcePath = dispatchedSourcePath(commentExtra);
+                if (dispatched != null) {
+                    taskId = firstNonBlank(dispatched.taskId(), taskId);
+                    resultId = firstNonBlank(dispatched.resultId(), resultId);
+                    sourcePath = firstNonBlank(dispatched.sourcePath(), sourcePath);
+                }
+                jdbc.update(
+                        """
+                        UPDATE biz_file
+                        SET status = 'transferred', updated_at = ?,
+                            server2_task_id = CASE WHEN ? = '' THEN server2_task_id ELSE ? END,
+                            server2_result_id = CASE WHEN ? = '' THEN server2_result_id ELSE ? END,
+                            server2_source_path = CASE WHEN ? = '' THEN server2_source_path ELSE ? END,
+                            server2_ref = CASE WHEN ? = '' THEN server2_ref ELSE ? END
+                        WHERE file_id = ?
+                        """,
+                        ts, taskId, taskId, resultId, resultId, sourcePath, sourcePath, resultId, resultId,
+                        current.fileId()
+                );
             }
             if ("task".equals(type) && current.taskId() != null) {
                 jdbc.update(
@@ -189,17 +225,39 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
                             updated_at = ?
                         WHERE task_id = ?
                         """,
-                        "s2job_" + circulationId, ts, current.taskId()
+                        jobRef, ts, current.taskId()
                 );
             }
+            String persistResultId = "";
+            if (dispatched != null) {
+                persistResultId = firstNonBlank(dispatched.resultId());
+            }
+            if (persistResultId.isBlank()) {
+                persistResultId = dispatchedResultId(commentExtra);
+            }
+            if (persistResultId.length() > 64) {
+                persistResultId = persistResultId.substring(0, 64);
+            }
             jdbc.update(
-                    "UPDATE biz_circulation SET distribute_status = 'dispatched', updated_at = ? WHERE circulation_id = ? AND deleted = 0",
-                    ts, circulationId
+                    """
+                    UPDATE biz_circulation
+                    SET distribute_status = 'dispatched', updated_at = ?,
+                        result_id = CASE WHEN ? = '' THEN result_id ELSE ? END,
+                        comment_text = CASE WHEN ? = '' THEN comment_text ELSE CONCAT(IFNULL(comment_text,''), ' ', ?) END
+                    WHERE circulation_id = ? AND deleted = 0
+                    """,
+                    ts, persistResultId, persistResultId, commentExtra, commentExtra, circulationId
             );
             auditRecorder.record("distribute", current.projectId(), current.fileId(), current.taskId(),
-                    "向服务器2提交" + typeLabel(type) + "授权 " + circulationId, "success");
+                    "向服务器2提交" + typeLabel(type) + "授权 " + circulationId + " " + commentExtra, "success");
             return loadById(circulationId);
         } catch (ApiException e) {
+            jdbc.update(
+                    "UPDATE biz_circulation SET distribute_status = 'failed', comment_text = ?, updated_at = ? WHERE circulation_id = ? AND deleted = 0",
+                    "分发失败：" + e.getMessage(), ts, circulationId
+            );
+            auditRecorder.record("distribute", current.projectId(), current.fileId(), current.taskId(),
+                    "向服务器2提交" + typeLabel(type) + "授权失败 " + circulationId, "error");
             throw e;
         } catch (Exception e) {
             jdbc.update(
@@ -210,6 +268,63 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
                     "向服务器2提交" + typeLabel(type) + "授权失败 " + circulationId, "error");
             throw new ApiException(ErrorCode.BAD_REQUEST, "分发授权失败，可在任务管理中重新提交");
         }
+    }
+
+    private Server2DispatchResult dispatchFile(CirculationDto current, AccessPrincipal principal) {
+        if (!server2DispatchClient.enabled()) {
+            return null;
+        }
+        if (current.fileId() == null || current.fileId().isBlank()) {
+            return null;
+        }
+        List<FileDispatchRow> rows = jdbc.query(
+                """
+                SELECT file_id, project_id, file_name, data_kind, content_hash, temp_receive_ref
+                FROM biz_file WHERE file_id = ? LIMIT 1
+                """,
+                (rs, i) -> new FileDispatchRow(
+                        rs.getString("file_id"),
+                        rs.getString("project_id"),
+                        rs.getString("file_name"),
+                        rs.getString("data_kind"),
+                        rs.getString("content_hash"),
+                        rs.getString("temp_receive_ref")
+                ),
+                current.fileId()
+        );
+        if (rows.isEmpty()) {
+            throw new ApiException(ErrorCode.NOT_FOUND, "分发失败：找不到已入库文件");
+        }
+        FileDispatchRow file = rows.get(0);
+        if (file.tempReceiveRef() == null || file.tempReceiveRef().isBlank()) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "分发失败：文件尚未落到服务器1磁盘");
+        }
+        Path local = Paths.get(file.tempReceiveRef());
+        if (!Files.isRegularFile(local)) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "分发失败：服务器1磁盘上的文件已丢失");
+        }
+        String userId = current.applyUserId() == null || current.applyUserId().isBlank()
+                ? principal.userId() : current.applyUserId();
+        return server2DispatchClient.dispatch(new Server2DispatchCommand(
+                file.projectId() == null ? current.projectId() : file.projectId(),
+                file.fileId(),
+                file.fileName() == null ? current.fileName() : file.fileName(),
+                file.dataKind(),
+                file.contentHash(),
+                local,
+                userId,
+                principal.userId()
+        ));
+    }
+
+    private record FileDispatchRow(
+            String fileId,
+            String projectId,
+            String fileName,
+            String dataKind,
+            String contentHash,
+            String tempReceiveRef
+    ) {
     }
 
     @Override
@@ -291,6 +406,65 @@ public class JdbcCirculationService implements CirculationService, CirculationIn
             return "上传文件";
         }
         return "提交任务";
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return "";
+    }
+
+    private static String dispatchedTaskId(String comment, String fallback) {
+        return firstNonBlank(extractToken(comment, "task="),
+                fallback != null && fallback.startsWith("s2job_") ? "" : fallback);
+    }
+
+    private static String dispatchedResultId(String comment) {
+        return extractToken(comment, "result=");
+    }
+
+    private static String dispatchedSourcePath(String comment) {
+        if (comment == null || comment.isBlank()) {
+            return "";
+        }
+        int idx = comment.indexOf("路径=");
+        if (idx < 0) {
+            idx = comment.indexOf("path=");
+        }
+        if (idx < 0) {
+            return "";
+        }
+        int start = comment.indexOf('=', idx) + 1;
+        int end = comment.indexOf(" task=", start);
+        if (end < 0) {
+            end = comment.indexOf(' ', start);
+        }
+        if (end < 0) {
+            end = comment.length();
+        }
+        return comment.substring(start, end).trim();
+    }
+
+    private static String extractToken(String comment, String key) {
+        if (comment == null || key == null) {
+            return "";
+        }
+        int idx = comment.indexOf(key);
+        if (idx < 0) {
+            return "";
+        }
+        int start = idx + key.length();
+        int end = comment.indexOf(' ', start);
+        if (end < 0) {
+            end = comment.length();
+        }
+        return comment.substring(start, end).trim();
     }
 
     private CirculationDto mapCirculation(java.sql.ResultSet rs, int i) throws java.sql.SQLException {

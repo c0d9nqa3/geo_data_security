@@ -245,6 +245,12 @@ class Server1ApplicationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items").isArray())
                 .andExpect(jsonPath("$.data.pageSize").value(1));
+        mockMvc.perform(get("/api/files/file_2001/provenance").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.fileId").value("file_2001"))
+                .andExpect(jsonPath("$.data.nodes").isArray())
+                .andExpect(jsonPath("$.data.currentLabel").isNotEmpty())
+                .andExpect(jsonPath("$.data.evidence.resultId").value("res_demo"));
         mockMvc.perform(get("/api/tasks").param("page", "1").param("pageSize", "1")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())

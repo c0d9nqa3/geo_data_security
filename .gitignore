@@ -46,3 +46,7 @@ Thumbs.db
 
 # Offline installers are kept locally, not committed
 deploy/offline/packages/
+
+# Local dispatch self-test sink
+tests/fake_server2_inbox/
+tests/*.class

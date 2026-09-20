@@ -3,11 +3,14 @@
     <div class="toolbar">
       <select v-model="projectFilter">
         <option value="">全部项目</option>
-        <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+        <option v-for="p in projects" :key="p.id" :value="p.id">{{ projectLabel(p) }}</option>
       </select>
-      <button type="button" class="primary" @click="showUpload = true">上传数据</button>
+      <button type="button" class="primary" @click="openUpload">上传数据</button>
     </div>
-    <p class="hint">{{ reviewer ? '管理员可查看全部上传文件。' : '你只能看到自己上传的文件，入库后可发起处理作业。' }}</p>
+    <p class="hint">
+      {{ reviewer ? '管理员可查看全部上传文件。' : '你只能看到自己上传的文件，入库后可发起处理作业。' }}
+      点「查看溯源」可看该文件从上传、审核、分发到服务器2解析、安全处理、上链和校验的完整节点。
+    </p>
 
     <div class="table-wrap">
       <div v-if="loading" class="empty-inline">加载中…</div>
@@ -19,7 +22,7 @@
             <th>所属项目</th>
             <th>大小</th>
             <th>状态</th>
-            <th>哈希</th>
+            <th>文件 ID</th>
             <th>上传人</th>
             <th>时间</th>
             <th>操作</th>
@@ -29,22 +32,25 @@
           <tr v-for="f in files" :key="f.id">
             <td class="name">{{ f.name }}</td>
             <td>{{ f.kind }}</td>
-            <td>{{ f.projectName }}</td>
+            <td>{{ fileProjectName(f) }}</td>
             <td>{{ f.sizeMb }} MB</td>
             <td><span class="tag" :data-s="f.status">{{ statusText(f.status) }}</span></td>
-            <td><code>{{ f.hash }}</code></td>
+            <td><code>{{ f.id }}</code></td>
             <td>{{ f.uploadedBy }}</td>
             <td>{{ f.uploadedAt }}</td>
             <td>
-              <button
-                v-if="f.status === 'transferred'"
-                type="button"
-                class="btn-mini"
-                @click="startProcess(f.id)"
-              >
-                发起处理
-              </button>
-              <span v-else class="muted">入库后可处理</span>
+              <div class="ops">
+                <button type="button" class="btn-mini" @click="openTrace(f)">查看溯源</button>
+                <button
+                  v-if="f.status === 'transferred'"
+                  type="button"
+                  class="btn-mini"
+                  @click="startProcess(f.id)"
+                >
+                  发起处理
+                </button>
+                <span v-else class="muted">入库后可处理</span>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -60,7 +66,7 @@
           目标项目
           <select v-model="form.projectId" required>
             <option disabled value="">请选择</option>
-            <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+            <option v-for="p in projects" :key="p.id" :value="p.id">{{ projectLabel(p) }}</option>
           </select>
         </label>
         <label>
@@ -98,17 +104,77 @@
         </div>
       </form>
     </div>
+
+    <div v-if="traceOpen" class="modal-mask" @click.self="closeTrace">
+      <div class="modal trace-modal">
+        <h3>{{ traceFile?.name || '文件溯源' }}</h3>
+        <p class="tip">
+          {{ trace?.projectName || traceFile?.projectName }}
+          · 当前节点 {{ trace?.currentLabel || (traceLoading ? '查询中…' : '—') }}
+        </p>
+        <p v-if="trace?.liveHint" class="tip">{{ trace.liveHint }}</p>
+        <p v-if="traceError" class="tip" style="color: var(--danger)">{{ traceError }}</p>
+        <div v-if="traceLoading" class="empty-inline">正在拉取溯源节点…</div>
+        <ol v-else-if="trace" class="trace">
+          <li v-for="n in trace.nodes" :key="n.key" :data-s="n.state">
+            <span class="dot" :data-s="n.state" />
+            <div class="trace-body">
+              <div class="trace-head">
+                <strong>{{ n.label }}</strong>
+                <em>{{ nodeStateText(n.state) }}</em>
+              </div>
+              <p v-if="n.remark">{{ n.remark }}</p>
+              <span v-if="n.actor || n.time" class="muted">{{ [n.actor, n.time].filter(Boolean).join(' · ') }}</span>
+            </div>
+          </li>
+        </ol>
+        <dl v-if="trace && !traceLoading" class="meta">
+          <div><dt>文件 ID</dt><dd><code>{{ trace.fileId }}</code></dd></div>
+          <div v-if="trace.evidence.taskId"><dt>服务器2任务</dt><dd><code>{{ trace.evidence.taskId }}</code></dd></div>
+          <div v-if="trace.evidence.resultId"><dt>结果 ID</dt><dd><code>{{ trace.evidence.resultId }}</code></dd></div>
+          <div v-if="trace.evidence.sourcePath"><dt>落盘路径</dt><dd class="wrap">{{ trace.evidence.sourcePath }}</dd></div>
+          <div v-if="trace.evidence.verified != null"><dt>校验</dt><dd>{{ trace.evidence.verified ? '通过' : '未通过' }}{{ trace.evidence.method ? ` · ${trace.evidence.method}` : '' }}</dd></div>
+          <div v-if="trace.evidence.filesProcessed != null"><dt>处理文件</dt><dd>{{ trace.evidence.matched ?? '—' }} / {{ trace.evidence.filesProcessed }}</dd></div>
+          <div v-if="trace.evidence.onChain != null"><dt>上链</dt><dd>{{ trace.evidence.onChain ? '已上链' : '未上链' }}</dd></div>
+          <div v-if="trace.evidence.chainBlock"><dt>区块</dt><dd>{{ trace.evidence.chainBlock }}</dd></div>
+        </dl>
+        <p v-if="gdsDetail" class="tip gds-detail">{{ gdsDetail.startsWith('{') ? '接口返回：\n' + gdsDetail : gdsDetail }}</p>
+        <GdsVerificationPanel v-if="gdsVerification" :data="gdsVerification" />
+        <div v-if="trace?.evidence.resultId" class="trace-gds-actions">
+          <button type="button" class="ghost" :disabled="gdsBusy" @click="refreshGdsVerification">
+            {{ gdsBusy ? '查询中…' : '校验结果' }}
+          </button>
+          <button type="button" class="ghost" :disabled="gdsBusy" @click="loadTraceManifest">成果清单</button>
+          <button type="button" class="ghost" :disabled="gdsBusy" @click="loadTraceProvQuery">溯源详情</button>
+          <button type="button" class="ghost" :disabled="gdsBusy" @click="startTraceExport">创建导出</button>
+          <button v-if="trace.evidence.taskId" type="button" class="ghost" :disabled="gdsBusy" @click="loadTraceTask">
+            任务状态
+          </button>
+        </div>
+        <div class="actions">
+          <button type="button" class="ghost" @click="closeTrace">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { fetchFiles, uploadFile } from '@/modules/ingest/api'
-import { fetchProjects } from '@/modules/project/api'
+import { fetchFiles, fetchFileProvenance, uploadFile } from '@/modules/ingest/api'
+import {
+  fetchFileGdsManifest,
+  fetchFileGdsVerification,
+  fetchGdsTask,
+  postFileGdsExport,
+  queryFileGdsProvenance,
+} from '@/modules/gds/api'
+import GdsVerificationPanel from '@/modules/gds/GdsVerificationPanel.vue'
+import { fetchAllProjects } from '@/modules/project/api'
 import { canReview } from '@/shared/access'
 import PagerBar from '@/shared/PagerBar.vue'
-import type { DataFile, FileKind, Project } from '@/types'
+import type { DataFile, FileKind, FileProvenance, Project } from '@/types'
 
 const router = useRouter()
 const reviewer = canReview()
@@ -126,6 +192,14 @@ const submitting = ref(false)
 const errorMsg = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 const pickedFile = ref<File | null>(null)
+const traceOpen = ref(false)
+const traceLoading = ref(false)
+const traceError = ref('')
+const traceFile = ref<DataFile | null>(null)
+const trace = ref<FileProvenance | null>(null)
+const gdsBusy = ref(false)
+const gdsDetail = ref('')
+const gdsVerification = ref<Record<string, unknown> | null>(null)
 const form = reactive({
   projectId: '',
   kind: 'DLG' as FileKind,
@@ -153,8 +227,145 @@ function statusText(s: DataFile['status']) {
   )[s]
 }
 
+function looksGarbled(name?: string) {
+  const value = (name || '').trim()
+  if (!value) return true
+  return value.includes('?') || value.includes('？')
+}
+
+function projectLabel(p: Project) {
+  if (!looksGarbled(p.name)) {
+    return p.name
+  }
+  return p.code || p.id
+}
+
+function fileProjectName(file: DataFile) {
+  if (!looksGarbled(file.projectName)) {
+    return file.projectName
+  }
+  const hit = projects.value.find((p) => p.id === file.projectId)
+  return hit ? projectLabel(hit) : file.projectId
+}
+
+async function loadProjects() {
+  try {
+    projects.value = await fetchAllProjects()
+  } catch {
+    projects.value = []
+  }
+}
+
+async function openUpload() {
+  await loadProjects()
+  showUpload.value = true
+}
+
 function startProcess(fileId: string) {
   router.push({ name: 'tasks', query: { fileId } })
+}
+
+function nodeStateText(s?: string) {
+  const map: Record<string, string> = {
+    done: '已完成',
+    current: '进行中',
+    waiting: '未到达',
+    skipped: '已跳过',
+    rejected: '已驳回',
+    failed: '失败',
+  }
+  return map[s || ''] ?? s ?? ''
+}
+
+async function openTrace(file: DataFile) {
+  traceFile.value = file
+  traceOpen.value = true
+  traceLoading.value = true
+  traceError.value = ''
+  trace.value = null
+  gdsDetail.value = ''
+  gdsVerification.value = null
+  try {
+    trace.value = await fetchFileProvenance(file.id)
+  } catch (e) {
+    traceError.value = e instanceof Error ? e.message : '溯源查询失败'
+  } finally {
+    traceLoading.value = false
+  }
+}
+
+function closeTrace() {
+  traceOpen.value = false
+  traceLoading.value = false
+  traceError.value = ''
+  traceFile.value = null
+  trace.value = null
+  gdsDetail.value = ''
+  gdsVerification.value = null
+  gdsBusy.value = false
+}
+
+function traceFileId(): string | undefined {
+  return traceFile.value?.id
+}
+
+async function runGdsAction(fn: () => Promise<void>) {
+  gdsBusy.value = true
+  gdsDetail.value = ''
+  try {
+    await fn()
+  } catch (e) {
+    gdsDetail.value = e instanceof Error ? e.message : '操作失败'
+    gdsVerification.value = null
+  } finally {
+    gdsBusy.value = false
+  }
+}
+
+async function refreshGdsVerification() {
+  const fid = traceFileId()
+  if (!fid || !trace.value?.evidence.resultId) return
+  await runGdsAction(async () => {
+    const data = await fetchFileGdsVerification(fid)
+    gdsVerification.value = data
+    gdsDetail.value = ''
+  })
+}
+
+async function loadTraceManifest() {
+  const fid = traceFileId()
+  if (!fid) return
+  await runGdsAction(async () => {
+    gdsVerification.value = null
+    gdsDetail.value = JSON.stringify(await fetchFileGdsManifest(fid), null, 2)
+  })
+}
+
+async function loadTraceProvQuery() {
+  const fid = traceFileId()
+  if (!fid) return
+  await runGdsAction(async () => {
+    gdsVerification.value = null
+    gdsDetail.value = JSON.stringify(await queryFileGdsProvenance(fid), null, 2)
+  })
+}
+
+async function startTraceExport() {
+  const fid = traceFileId()
+  if (!fid) return
+  await runGdsAction(async () => {
+    gdsVerification.value = null
+    gdsDetail.value = JSON.stringify(await postFileGdsExport(fid), null, 2)
+  })
+}
+
+async function loadTraceTask() {
+  const taskId = trace.value?.evidence.taskId
+  if (!taskId) return
+  await runGdsAction(async () => {
+    gdsVerification.value = null
+    gdsDetail.value = JSON.stringify(await fetchGdsTask(taskId), null, 2)
+  })
 }
 
 function inferKind(name: string): FileKind {
@@ -198,12 +409,7 @@ function closeUpload() {
 }
 
 onMounted(async () => {
-  try {
-    const projectPage = await fetchProjects({ page: 1, pageSize: 100 })
-    projects.value = projectPage.items
-  } catch {
-    projects.value = []
-  }
+  await loadProjects()
   await reload()
 })
 
@@ -369,6 +575,13 @@ tr:last-child td {
   font-size: 12px;
 }
 
+.ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
 .btn-mini {
   border-radius: 8px;
   padding: 5px 10px;
@@ -438,6 +651,12 @@ code {
   background: var(--bg-elevated);
 }
 
+.trace-modal {
+  width: min(720px, 100%);
+  max-height: min(86vh, 860px);
+  overflow: auto;
+}
+
 .modal h3 {
   margin: 0;
 }
@@ -469,6 +688,142 @@ code {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.5;
+}
+
+.gds-detail {
+  white-space: pre-wrap;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  max-height: 200px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--bg-panel);
+  border-radius: 6px;
+}
+
+.trace-gds-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.trace {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 8px;
+  display: grid;
+  gap: 0;
+}
+
+.trace li {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 12px;
+  position: relative;
+  padding-bottom: 16px;
+}
+
+.trace li:last-child {
+  padding-bottom: 0;
+}
+
+.trace li::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 18px;
+  bottom: 0;
+  width: 2px;
+  background: #d5e3ec;
+}
+
+.trace li:last-child::before {
+  display: none;
+}
+
+.trace .dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: #fff;
+  z-index: 1;
+}
+
+.trace .dot[data-s='done'] {
+  background: #0f9d8e;
+  border-color: #0f9d8e;
+}
+
+.trace .dot[data-s='current'] {
+  background: #2b7de9;
+  border-color: #2b7de9;
+  box-shadow: 0 0 0 4px rgba(43, 125, 233, 0.16);
+}
+
+.trace .dot[data-s='rejected'],
+.trace .dot[data-s='failed'] {
+  background: #e76f51;
+  border-color: #e76f51;
+}
+
+.trace .dot[data-s='skipped'],
+.trace .dot[data-s='waiting'] {
+  background: #e7eef3;
+}
+
+.trace-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.trace-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.trace-head em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.trace-body p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-all;
+}
+
+.meta {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.meta div {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.meta dt {
+  color: var(--text-muted);
+}
+
+.meta dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.meta code,
+.wrap {
+  word-break: break-all;
 }
 
 .actions {

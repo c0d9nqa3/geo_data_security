@@ -24,7 +24,7 @@
           <tr v-for="p in projects" :key="p.id">
             <td><code>{{ p.code }}</code></td>
             <td>
-              <div class="name">{{ p.name }}</div>
+              <div class="name">{{ displayName(p) }}</div>
               <div class="desc">{{ p.description }}</div>
             </td>
             <td><span class="tag" :data-s="p.status">{{ statusText(p.status) }}</span></td>
@@ -90,6 +90,14 @@ const errorMsg = ref('')
 
 function statusText(s: Project['status']) {
   return ({ active: '进行中', archived: '已归档', draft: '草稿' } as const)[s]
+}
+
+function displayName(p: Project) {
+  const name = (p.name || '').trim()
+  if (!name || name.includes('?') || name.includes('？')) {
+    return p.code || p.id
+  }
+  return name
 }
 
 async function reload() {

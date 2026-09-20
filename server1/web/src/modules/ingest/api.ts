@@ -1,4 +1,4 @@
-import type { DataFile, PageResult } from '@/types'
+import type { DataFile, FileProvenance, PageResult } from '@/types'
 import { request } from '@/shared/http'
 
 export async function fetchFiles(query?: {
@@ -12,6 +12,10 @@ export async function fetchFiles(query?: {
   if (query?.pageSize) params.set('pageSize', String(query.pageSize))
   const q = params.toString()
   return request(`/files${q ? `?${q}` : ''}`)
+}
+
+export async function fetchFileProvenance(fileId: string): Promise<FileProvenance> {
+  return request(`/files/${encodeURIComponent(fileId)}/provenance`, { timeoutMs: 60_000 })
 }
 
 export async function uploadFile(input: {

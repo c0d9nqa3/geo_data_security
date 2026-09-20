@@ -87,26 +87,21 @@
     <div v-if="detail" class="modal-mask" @click.self="detail = null">
       <div class="modal">
         <h3>{{ detail.title || detail.fileName || detail.projectName }}</h3>
-        <p class="tip">{{ detail.type }} · 发起人 {{ detail.applyUser || '—' }} · 审核人 {{ detail.reviewUser || '未审核' }}</p>
+        <p class="tip">发起人 {{ detail.applyUser || '—' }} · 审核人 {{ detail.reviewUser || '—' }}</p>
         <div class="flow">
           <div v-for="(n, i) in detail.nodes || []" :key="n.key" class="flow-item">
             <div class="flow-node">
               <span class="dot" :data-s="n.state" />
               <strong>{{ n.label }}</strong>
+              <span class="actor">{{ n.actor || '—' }}</span>
               <em>{{ nodeStateText(n.state) }}</em>
-              <span v-if="n.actor">{{ n.actor }}</span>
-              <span v-if="n.time" class="muted">{{ n.time }}</span>
-              <span v-if="n.remark" class="remark">{{ n.remark }}</span>
             </div>
-            <i v-if="i < (detail.nodes?.length || 0) - 1" class="flow-line" :data-s="n.state" />
+            <i v-if="i < (detail.nodes?.length || 0) - 1" class="flow-line" :data-s="lineState(n.state)" />
           </div>
         </div>
-        <dl class="meta">
-          <div><dt>当前节点</dt><dd>{{ detail.currentNodeLabel }}</dd></div>
-          <div><dt>审核状态</dt><dd>{{ statusText(detail.status) }}</dd></div>
-          <div><dt>催办次数</dt><dd>{{ detail.urgeCount || 0 }}{{ detail.lastUrgeAt ? `（最近 ${detail.lastUrgeAt}）` : '' }}</dd></div>
-          <div><dt>意见</dt><dd>{{ detail.comment || '—' }}</dd></div>
-        </dl>
+        <p v-if="detail.status === 'failed' || detail.status === 'rejected'" class="fail-hint">
+          {{ statusText(detail.status) }}
+        </p>
         <div class="actions">
           <button v-if="detail.canUrge" type="button" class="primary" :disabled="busyId === detail.id" @click="onUrge(detail)">催办</button>
           <RouterLink v-if="canGoCirculate(detail)" class="ghost link-btn" :to="{ name: 'circulation', query: { circulationId: detail.id } }">去流转</RouterLink>
@@ -164,6 +159,12 @@ function nodeStateText(s?: string) {
     failed: '失败',
   }
   return map[s || ''] ?? s ?? ''
+}
+
+function lineState(s?: string) {
+  if (s === 'done') return 'done'
+  if (s === 'failed' || s === 'rejected') return 'failed'
+  return 'waiting'
 }
 
 function canGoCirculate(t: TaskItem) {
@@ -413,23 +414,25 @@ th {
 }
 .flow-node {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   justify-items: center;
   text-align: center;
-  font-size: 12px;
-  min-width: 120px;
+  font-size: 13px;
+  min-width: 100px;
+  padding: 0 4px;
 }
 .flow-node strong {
   color: var(--text);
+  font-size: 13px;
+}
+.flow-node .actor {
+  color: var(--text);
+  font-weight: 500;
 }
 .flow-node em {
   font-style: normal;
+  font-size: 11px;
   color: var(--text-muted);
-}
-.flow-node span,
-.remark {
-  color: var(--text-muted);
-  line-height: 1.4;
 }
 .dot {
   width: 18px;
@@ -466,22 +469,13 @@ th {
 .flow-line[data-s='done'] {
   background: #0f9d8e;
 }
-.meta {
-  display: grid;
-  gap: 8px;
-  margin: 0;
+.flow-line[data-s='failed'] {
+  background: #e76f51;
 }
-.meta div {
-  display: grid;
-  grid-template-columns: 88px 1fr;
-  gap: 8px;
+.fail-hint {
+  margin: 0;
   font-size: 13px;
-}
-dt {
-  color: var(--text-muted);
-}
-dd {
-  margin: 0;
+  color: var(--danger);
 }
 .actions {
   display: flex;
